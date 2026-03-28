@@ -1,7 +1,4 @@
 import { createHash } from "crypto";
-import {
-  RelloUnavailableError,
-} from "./errors.js";
 
 /**
  * Configuration for the platform key validator.
