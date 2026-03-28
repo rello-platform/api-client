@@ -38,6 +38,13 @@ export function createServiceClient(config: ServiceClientConfig): ServiceClient 
 export { RelloClient, type RelloClientConfig } from "./client.js";
 export { ServiceClient, type ServiceClientConfig } from "./service-client.js";
 
+// Platform key validation (Phase B: receiving app authenticates callers via Rello)
+export {
+  createPlatformKeyValidator,
+  type PlatformKeyValidatorConfig,
+  type PlatformCaller,
+} from "./platform-key-validator.js";
+
 // Errors
 export {
   RelloError,
