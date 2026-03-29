@@ -168,7 +168,9 @@ export class LeadsResource {
     id: string,
     fields: Record<string, unknown>
   ): Promise<void> {
-    await this.transport.patch(`/leads/${id}/custom-fields`, tenantId, fields);
+    // Rello's endpoint expects { customFields: {...} } — the fields must be
+    // wrapped in a customFields envelope for the server-side merge to work.
+    await this.transport.patch(`/leads/${id}/custom-fields`, tenantId, { customFields: fields });
   }
 
   async getConversionScore(tenantId: string, id: string): Promise<ConversionScore> {

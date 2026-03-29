@@ -408,7 +408,7 @@ var LeadsResource = class {
     await this.transport.post(`/leads/${id}/tags`, tenantId, { tags });
   }
   async setCustomFields(tenantId, id, fields) {
-    await this.transport.patch(`/leads/${id}/custom-fields`, tenantId, fields);
+    await this.transport.patch(`/leads/${id}/custom-fields`, tenantId, { customFields: fields });
   }
   async getConversionScore(tenantId, id) {
     return this.transport.get(
