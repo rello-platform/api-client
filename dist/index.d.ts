@@ -98,24 +98,34 @@ interface CreateLeadInput {
     providingGuestMLOId?: string;
     /** Trigger HomeReady app invite email on creation. */
     sendHomeReadyInvite?: boolean;
-    /** Custom fields to set on the lead. Merged into Lead.customFields. */
+    /** Custom fields to set on the lead (initial value on create). For merging later, use setCustomFields(). */
     customFields?: Record<string, unknown>;
+    /** HomeReady assessment score (0-100). */
+    homeReadyScore?: number;
+    /** Source detail (e.g., campaign name, referral context). */
+    sourceDetail?: string;
+    /** Explicit agent assignment — Rello User ID. Bypasses routing engine. */
+    assignedAgentId?: string;
+    /** MLO assignment — Rello User ID. */
+    assignedMloId?: string;
+    /** Which apps contributed data to this lead (e.g., ["HOMEREADY"]). */
+    appsUsed?: string[];
 }
 interface UpdateLeadInput {
     email?: string;
     phone?: string;
     firstName?: string;
     lastName?: string;
-    address?: string;
-    city?: string;
-    state?: string;
-    zip?: string;
+    source?: string;
+    propertyType?: string;
+    priceRange?: string;
+    timeline?: string;
+    areas?: string[];
     currentStage?: string;
-    customFields?: Record<string, unknown>;
-    coBorrowerFirstName?: string;
-    coBorrowerLastName?: string;
-    coBorrowerSource?: string;
-    coBorrowerUpdatedAt?: string;
+    score?: number;
+    homeReadyScore?: number;
+    assignedAgentId?: string;
+    assignedMloId?: string;
     [key: string]: unknown;
 }
 interface ListLeadsParams {
