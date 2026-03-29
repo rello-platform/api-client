@@ -645,8 +645,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get offline interactions for a lead */
-        get: {
+        get?: never;
+        put?: never;
+        /** Create an offline interaction for a lead */
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -655,10 +657,21 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        type: string;
+                        notes?: string;
+                        occurredAt?: string;
+                        data?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
             responses: {
-                /** @description Offline interactions list */
-                200: {
+                /** @description Offline interaction created */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -711,8 +724,6 @@ export interface paths {
                 };
             };
         };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3979,6 +3990,7 @@ export interface components {
         };
         TagsListResponse: {
             tags: components["schemas"]["Tag"][];
+            total?: number;
         };
         TagSearchResponse: {
             tags: components["schemas"]["Tag"][];
@@ -4056,7 +4068,7 @@ export interface components {
                     metric: string;
                     currentPeriodTotal: number;
                     limit: number | null;
-                    percentUsed: number;
+                    percentUsed: number | null;
                 }[];
                 limits: {
                     [key: string]: number | null;
@@ -4316,14 +4328,7 @@ export interface components {
                 lastName: string;
                 email: string | null;
                 phone: string | null;
-                stage: string;
-                score: number;
-                owner: {
-                    id: string;
-                    firstName: string;
-                    lastName: string;
-                    email: string;
-                };
+                currentStage: string;
             };
             sharedBy: {
                 id: string;
