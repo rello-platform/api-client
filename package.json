@@ -18,7 +18,9 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "openapi:generate": "npx openapi-typescript ../Rello/public/openapi.json -o src/generated/api-types.ts",
+    "openapi:generate-remote": "npx openapi-typescript https://hellorello.app/api/openapi -o src/generated/api-types.ts"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
@@ -30,6 +32,7 @@
   "license": "UNLICENSED",
   "devDependencies": {
     "@types/node": "^25.5.0",
+    "openapi-typescript": "^7.13.0",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   }
