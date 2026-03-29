@@ -528,6 +528,14 @@ declare class PlatformResource {
     private readonly transport;
     /** In-memory cache: slug → { app, expiresAt }. */
     private readonly appCache;
+    /**
+     * Cached ServiceClient instances keyed by slug. Invalidated when the
+     * corresponding AppInfo cache expires (baseUrl might have changed).
+     * Sharing a ServiceClient per slug means the circuit breaker state
+     * persists across calls — if a service goes down, all callers see
+     * the open breaker instead of each getting a fresh one.
+     */
+    private readonly serviceCache;
     constructor(transport: Transport);
     /**
      * Look up a registered platform app by slug.

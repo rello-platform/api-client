@@ -834,6 +834,14 @@ var PlatformResource = class {
     this.transport = transport;
     /** In-memory cache: slug → { app, expiresAt }. */
     this.appCache = /* @__PURE__ */ new Map();
+    /**
+     * Cached ServiceClient instances keyed by slug. Invalidated when the
+     * corresponding AppInfo cache expires (baseUrl might have changed).
+     * Sharing a ServiceClient per slug means the circuit breaker state
+     * persists across calls — if a service goes down, all callers see
+     * the open breaker instead of each getting a fresh one.
+     */
+    this.serviceCache = /* @__PURE__ */ new Map();
   }
   /**
    * Look up a registered platform app by slug.
@@ -862,6 +870,7 @@ var PlatformResource = class {
       app,
       expiresAt: Date.now() + CACHE_TTL_MS
     });
+    this.serviceCache.delete(slug);
     return app;
   }
   /**
@@ -880,17 +889,24 @@ var PlatformResource = class {
    *   const data = await pe.get("/api/lookups/123");
    */
   async resolveService(slug) {
+    const cachedApp = this.appCache.get(slug);
+    const cachedService = this.serviceCache.get(slug);
+    if (cachedApp && cachedApp.expiresAt > Date.now() && cachedService) {
+      return cachedService;
+    }
     const app = await this.getApp(slug);
     if (!app.baseUrl) {
       throw new Error(
         `@rello-platform/api-client: App '${slug}' has no baseUrl configured in the registry`
       );
     }
-    return new ServiceClient({
+    const client = new ServiceClient({
       baseUrl: app.baseUrl,
       apiKey: this.transport.getApiKey(),
       appSlug: this.transport.getAppSlug()
     });
+    this.serviceCache.set(slug, client);
+    return client;
   }
 };
 

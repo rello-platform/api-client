@@ -3,7 +3,7 @@ import type { AppInfo } from "../types/platform.js";
 import { ServiceClient } from "../service-client.js";
 
 /** Cache entry: app info + expiry timestamp. */
-interface CacheEntry {
+interface AppCacheEntry {
   app: AppInfo;
   expiresAt: number;
 }
@@ -19,7 +19,16 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
  */
 export class PlatformResource {
   /** In-memory cache: slug → { app, expiresAt }. */
-  private readonly appCache = new Map<string, CacheEntry>();
+  private readonly appCache = new Map<string, AppCacheEntry>();
+
+  /**
+   * Cached ServiceClient instances keyed by slug. Invalidated when the
+   * corresponding AppInfo cache expires (baseUrl might have changed).
+   * Sharing a ServiceClient per slug means the circuit breaker state
+   * persists across calls — if a service goes down, all callers see
+   * the open breaker instead of each getting a fresh one.
+   */
+  private readonly serviceCache = new Map<string, ServiceClient>();
 
   constructor(private readonly transport: Transport) {}
 
@@ -52,11 +61,13 @@ export class PlatformResource {
 
     const app = res.app;
 
-    // Cache the result
+    // Cache the result. Invalidate the ServiceClient cache for this slug —
+    // the baseUrl may have changed (e.g., app redeployed to a new URL).
     this.appCache.set(slug, {
       app,
       expiresAt: Date.now() + CACHE_TTL_MS,
     });
+    this.serviceCache.delete(slug);
 
     return app;
   }
@@ -77,6 +88,15 @@ export class PlatformResource {
    *   const data = await pe.get("/api/lookups/123");
    */
   async resolveService(slug: string): Promise<ServiceClient> {
+    // Return cached ServiceClient if the AppInfo cache is still fresh.
+    // This ensures the circuit breaker state persists across calls.
+    const cachedApp = this.appCache.get(slug);
+    const cachedService = this.serviceCache.get(slug);
+    if (cachedApp && cachedApp.expiresAt > Date.now() && cachedService) {
+      return cachedService;
+    }
+
+    // Cache miss or stale — re-resolve from registry.
     const app = await this.getApp(slug);
 
     if (!app.baseUrl) {
@@ -85,10 +105,13 @@ export class PlatformResource {
       );
     }
 
-    return new ServiceClient({
+    const client = new ServiceClient({
       baseUrl: app.baseUrl,
       apiKey: this.transport.getApiKey(),
       appSlug: this.transport.getAppSlug(),
     });
+
+    this.serviceCache.set(slug, client);
+    return client;
   }
 }
