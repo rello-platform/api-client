@@ -96,6 +96,46 @@ export interface ListLeadsParams {
   stage?: string;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
+  /** Filter leads by assigned agent (Rello User ID). */
+  agentId?: string;
+}
+
+/** Paginated leads response — preserves the pagination envelope from the server. */
+export interface LeadsPage {
+  leads: Lead[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+export interface NurtureDecision {
+  framework: string | null;
+  contentDirection: string | null;
+  contentPhase: string | null;
+}
+
+export interface NurtureDecisionParams {
+  limit?: number;
+  action?: string;
+}
+
+export interface FindByTagsInput {
+  tagSlugs: string[];
+  operator: "AND" | "OR";
+  excludeTagSlugs?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface FindByTagsResult {
+  leads: Lead[];
+  total: number;
+}
+
+export interface BatchTagsResult {
+  leadTags: Record<string, Array<{ id: string; name: string; slug: string; category: string; color: string }>>;
+  found: number;
+  requested: number;
 }
 
 export interface ConversionScore {

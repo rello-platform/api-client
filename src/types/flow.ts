@@ -26,3 +26,19 @@ export interface Enrollment {
   enrollmentSource: string;
   enrolledAt: string;
 }
+
+export interface Journey {
+  id: string;
+  name: string;
+  slug?: string;
+  description?: string;
+  status: string;
+  isActive: boolean;
+  isTemplate?: boolean;
+}
+
+export interface JourneyListParams {
+  isActive?: boolean;
+  includeArchived?: boolean;
+  search?: string;
+}

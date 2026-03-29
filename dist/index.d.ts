@@ -138,6 +138,46 @@ interface ListLeadsParams {
     stage?: string;
     sortBy?: string;
     sortOrder?: "asc" | "desc";
+    /** Filter leads by assigned agent (Rello User ID). */
+    agentId?: string;
+}
+/** Paginated leads response — preserves the pagination envelope from the server. */
+interface LeadsPage {
+    leads: Lead[];
+    total: number;
+    page: number;
+    totalPages: number;
+}
+interface NurtureDecision {
+    framework: string | null;
+    contentDirection: string | null;
+    contentPhase: string | null;
+}
+interface NurtureDecisionParams {
+    limit?: number;
+    action?: string;
+}
+interface FindByTagsInput {
+    tagSlugs: string[];
+    operator: "AND" | "OR";
+    excludeTagSlugs?: string[];
+    limit?: number;
+    offset?: number;
+}
+interface FindByTagsResult {
+    leads: Lead[];
+    total: number;
+}
+interface BatchTagsResult {
+    leadTags: Record<string, Array<{
+        id: string;
+        name: string;
+        slug: string;
+        category: string;
+        color: string;
+    }>>;
+    found: number;
+    requested: number;
 }
 interface ConversionScore {
     score: number;
@@ -189,9 +229,54 @@ declare class LeadsResource {
         created: boolean;
     }>;
     list(tenantId: string, params?: ListLeadsParams): Promise<Lead[]>;
+    /**
+     * List leads with the full pagination envelope.
+     *
+     * GET /api/v1/leads
+     *
+     * Unlike list() which returns Lead[], this preserves { leads, total, page, totalPages }
+     * for callers that need pagination metadata (e.g., Newsletter Studio's lead browser).
+     */
+    listWithPagination(tenantId: string, params?: ListLeadsParams): Promise<LeadsPage>;
     applyTags(tenantId: string, id: string, tags: string[]): Promise<void>;
     setCustomFields(tenantId: string, id: string, fields: Record<string, unknown>): Promise<void>;
     getConversionScore(tenantId: string, id: string): Promise<ConversionScore>;
+    /**
+     * Remove tags from a lead by tag name.
+     *
+     * DELETE /api/v1/leads/:id/tags
+     *
+     * Sends tag names in the request body. The v1 handler resolves names to IDs
+     * and removes each matching tag from the lead.
+     */
+    removeTags(tenantId: string, id: string, tags: string[]): Promise<void>;
+    /**
+     * Fetch recent Milo nurture decisions for a lead.
+     *
+     * GET /api/v1/leads/:id/nurture-decisions
+     *
+     * Used by Newsletter Studio's editorial pass (C3) to provide decision history
+     * context to Milo when generating personalized content.
+     * Returns empty array on 404 (lead has no decisions yet).
+     */
+    getNurtureDecisions(tenantId: string, id: string, params?: NurtureDecisionParams): Promise<NurtureDecision[]>;
+    /**
+     * Query leads by tag combinations (AND/OR with optional exclusions).
+     *
+     * POST /api/v1/leads/by-tags
+     *
+     * Used for audience segmentation in Newsletter Studio's smart content matching.
+     */
+    findByTags(tenantId: string, input: FindByTagsInput): Promise<FindByTagsResult>;
+    /**
+     * Fetch tags for multiple leads in a single call.
+     *
+     * POST /api/v1/leads/batch/tags
+     *
+     * Returns a map of leadId → Tag[] for all found leads.
+     * Leads not found are silently omitted from the result.
+     */
+    getBatchTags(tenantId: string, leadIds: string[]): Promise<BatchTagsResult>;
 }
 
 /**
@@ -378,6 +463,20 @@ interface Enrollment {
     enrollmentSource: string;
     enrolledAt: string;
 }
+interface Journey {
+    id: string;
+    name: string;
+    slug?: string;
+    description?: string;
+    status: string;
+    isActive: boolean;
+    isTemplate?: boolean;
+}
+interface JourneyListParams {
+    isActive?: boolean;
+    includeArchived?: boolean;
+    search?: string;
+}
 
 declare class FlowsResource {
     private readonly transport;
@@ -387,7 +486,34 @@ declare class FlowsResource {
 declare class JourneysResource {
     private readonly transport;
     constructor(transport: Transport);
+    /**
+     * List available journeys for a tenant.
+     *
+     * GET /api/v1/journeys
+     *
+     * For API key callers, returns JourneyTemplate objects (platform-wide templates
+     * available to the tenant). For session callers, returns tenant-specific journeys.
+     */
+    list(tenantId: string, params?: JourneyListParams): Promise<Journey[]>;
+    /**
+     * Enroll a lead into a journey by slug.
+     *
+     * POST /api/v1/journeys/enroll
+     *
+     * The server resolves the slug to the tenant's journey instance
+     * (or a cloned platform template).
+     */
     enroll(tenantId: string, leadId: string, journeySlug: string, context?: Record<string, unknown>, goalContext?: EnrollJourneyInput["goalContext"]): Promise<Enrollment>;
+    /**
+     * Enroll a lead into a journey by database ID.
+     *
+     * POST /api/v1/journeys/enroll
+     *
+     * Use this when you have the journey's database ID (e.g., from a previous
+     * journeys.list() call). The server verifies the journey belongs to the
+     * tenant and is active.
+     */
+    enrollById(tenantId: string, leadId: string, journeyId: string, context?: Record<string, unknown>): Promise<Enrollment>;
 }
 
 declare class SettingsResource {
@@ -579,6 +705,325 @@ declare class PlatformResource {
     resolveService(slug: string): Promise<ServiceClient>;
 }
 
+interface UpdateAgentInput {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+    slug?: string;
+    photoUrl?: string;
+    bio?: string;
+    brokerage?: string;
+    brokerageLogoUrl?: string;
+    licenseNumber?: string;
+    nmlsNumber?: string;
+    role?: string;
+    status?: string;
+}
+interface Agent {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string | null;
+    slug: string | null;
+    photoUrl: string | null;
+    bio: string | null;
+    brokerage: string | null;
+    brokerageLogoUrl: string | null;
+    licenseNumber: string | null;
+    nmlsNumber: string | null;
+    role: string;
+    status: string;
+    teamName: string | null;
+}
+
+declare class AgentsResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * Update an agent's profile in Rello.
+     *
+     * PATCH /api/v1/agents/:agentId
+     *
+     * Used by spoke apps to push local profile changes back to the hub
+     * (e.g., Newsletter Studio syncing agent bios, Home Scout syncing photos).
+     */
+    update(tenantId: string, agentId: string, data: UpdateAgentInput): Promise<Agent>;
+}
+
+interface Tag {
+    id: string;
+    name: string;
+    slug: string;
+    category: string | null;
+    color: string | null;
+    leadCount: number;
+}
+interface TagsListParams {
+    category?: string;
+    search?: string;
+    includeArchived?: boolean;
+}
+interface TagSearchParams {
+    query?: string;
+    category?: string;
+    limit?: number;
+}
+
+declare class TagsResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * List all tags for a tenant.
+     *
+     * GET /api/v1/tags
+     */
+    list(tenantId: string, params?: TagsListParams): Promise<Tag[]>;
+    /**
+     * Search tags by name with lead counts.
+     *
+     * GET /api/v1/tags/search
+     *
+     * Performs fuzzy matching on tag name and slug.
+     */
+    search(tenantId: string, params?: TagSearchParams): Promise<Tag[]>;
+}
+
+interface SegmentRules {
+    includeTags: string[];
+    excludeTags?: string[];
+    operator: "AND" | "OR";
+}
+interface Segment {
+    id: string;
+    name: string;
+    rules: SegmentRules;
+    createdAt: string;
+    updatedAt: string;
+}
+interface CreateSegmentInput {
+    name: string;
+    rules: SegmentRules;
+}
+
+declare class SegmentsResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * List saved segments for a tenant.
+     *
+     * GET /api/v1/segments
+     */
+    list(tenantId: string): Promise<Segment[]>;
+    /**
+     * Create a new saved segment.
+     *
+     * POST /api/v1/segments
+     */
+    create(tenantId: string, data: CreateSegmentInput): Promise<Segment>;
+}
+
+interface MiloOptimizationInput {
+    newsletterId: string;
+    flowId?: string;
+    leadIds?: string[];
+    articles?: Array<{
+        id: string;
+        title: string;
+        summary?: string;
+        topics?: string[];
+    }>;
+    optimizationGoals?: {
+        prioritize?: "opens" | "clicks" | "engagement";
+        targetAudience?: string[];
+    };
+    mode?: string;
+    currentScheduledTime?: string;
+    subject?: string;
+    content?: string;
+    recipientCount?: number;
+}
+interface MiloOptimizationResponse {
+    success: boolean;
+    suggestedSubject?: string;
+    suggestedSendTime?: string;
+    contentRecommendations?: string[];
+    estimatedOpenRate?: number;
+    [key: string]: unknown;
+}
+interface MiloContentInput {
+    leadId: string;
+    newsletterId?: string;
+    articles: Array<{
+        id: string;
+        title: string;
+        summary?: string;
+        topics?: string[];
+    }>;
+    customContext?: Record<string, unknown>;
+}
+interface MiloContentResponse {
+    success: boolean;
+    selectedArticles: string[];
+    reasoning: string;
+    [key: string]: unknown;
+}
+
+declare class MiloResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * Get AI optimization suggestions for a newsletter.
+     *
+     * POST /api/v1/milo/optimize-newsletter
+     *
+     * Returns subject line suggestions, optimal send time,
+     * content recommendations, and estimated open rate.
+     */
+    optimizeNewsletter(tenantId: string, data: MiloOptimizationInput): Promise<MiloOptimizationResponse>;
+    /**
+     * Get AI content selection for per-lead newsletter personalization.
+     *
+     * POST /api/v1/milo/select-content
+     *
+     * Given a lead and a set of available articles, returns which articles
+     * are most relevant to the lead along with reasoning.
+     */
+    selectContent(tenantId: string, data: MiloContentInput): Promise<MiloContentResponse>;
+}
+
+interface LeadShareOwner {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+}
+interface LeadShareLead {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email?: string;
+    phone?: string;
+    stage: string;
+    score: number;
+    owner: LeadShareOwner;
+    tags?: Array<{
+        tag: {
+            id: string;
+            name: string;
+            slug: string;
+            color: string;
+        };
+    }>;
+}
+interface LeadShare {
+    id: string;
+    leadId: string;
+    guestMLOId?: string;
+    sharedWithTenantId?: string;
+    permission: "none" | "notify" | "limited" | "full";
+    allowMLONewsletters: boolean;
+    autoShared: boolean;
+    createdAt: string;
+    lead: LeadShareLead;
+    sharedBy: LeadShareOwner;
+}
+interface LeadSharesListParams {
+    guestMLOId?: string;
+    permission?: string;
+    allowMLONewsletters?: boolean;
+    includeRevoked?: boolean;
+    limit?: number;
+    offset?: number;
+}
+
+declare class LeadSharesResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * List lead shares for a tenant.
+     *
+     * GET /api/v1/lead-shares
+     *
+     * Supports filtering by guest MLO, permission level, and newsletter opt-in.
+     * Returns shares with nested lead and sharedBy data.
+     */
+    list(tenantId: string, params?: LeadSharesListParams): Promise<{
+        shares: LeadShare[];
+        total: number;
+    }>;
+}
+
+interface TeamAgent {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone?: string;
+    role: string;
+    status: string;
+    slug?: string;
+    joinedAt?: string;
+    lastActiveAt?: string;
+    leadCount?: number;
+    openDealsCount?: number;
+    closedDealsThisMonth?: number;
+}
+interface TeamStats {
+    agentCount: number;
+    leadCount: number;
+    activeLeads: number;
+    totalAgents?: number;
+    activeAgents?: number;
+    newslettersSentThisMonth?: number;
+    avgOpenRate?: number;
+    avgClickRate?: number;
+}
+
+declare class TeamResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * List all agents in the tenant's team.
+     *
+     * GET /api/v1/team/agents
+     */
+    listAgents(tenantId: string): Promise<TeamAgent[]>;
+    /**
+     * Get a single team agent by ID.
+     *
+     * GET /api/v1/team/agents/:agentId
+     */
+    getAgent(tenantId: string, agentId: string): Promise<TeamAgent>;
+    /**
+     * Get aggregated team statistics.
+     *
+     * GET /api/v1/team/stats
+     */
+    getStats(tenantId: string): Promise<TeamStats>;
+}
+
+interface ReportIngestInput {
+    slug: string;
+    date: string;
+    metrics: Record<string, number>;
+}
+
+declare class ReportsResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * Ingest a report (daily stats, etc.) into Rello.
+     *
+     * POST /api/v1/reports/ingest
+     *
+     * Fire-and-forget from the caller's perspective — the report is
+     * stored for dashboard display and trend analysis.
+     */
+    ingest(tenantId: string, data: ReportIngestInput): Promise<void>;
+}
+
 interface RelloClientConfig {
     /** Rello API base URL. Default: RELLO_API_URL env var. Must NOT include "/api". */
     baseUrl?: string;
@@ -617,6 +1062,13 @@ declare class RelloClient {
     readonly prompts: PromptsResource;
     readonly webhooks: WebhooksResource;
     readonly platform: PlatformResource;
+    readonly agents: AgentsResource;
+    readonly tags: TagsResource;
+    readonly segments: SegmentsResource;
+    readonly milo: MiloResource;
+    readonly leadShares: LeadSharesResource;
+    readonly team: TeamResource;
+    readonly reports: ReportsResource;
     constructor(config?: RelloClientConfig);
     /**
      * Resolve a ServiceClient for another platform app by slug.
@@ -772,4 +1224,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AppInfo, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type Lead, type ListLeadsParams, type PlatformCaller, type PlatformKeyValidatorConfig, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, ServiceClient, type ServiceClientConfig, type UpdateLeadInput, type UsageInput, createPlatformKeyValidator, createRelloClient, createServiceClient };
+export { type Agent, type AppInfo, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type PlatformCaller, type PlatformKeyValidatorConfig, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, createPlatformKeyValidator, createRelloClient, createServiceClient };

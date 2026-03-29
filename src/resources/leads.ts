@@ -5,6 +5,12 @@ import type {
   UpdateLeadInput,
   ListLeadsParams,
   ConversionScore,
+  LeadsPage,
+  NurtureDecision,
+  NurtureDecisionParams,
+  FindByTagsInput,
+  FindByTagsResult,
+  BatchTagsResult,
 } from "../types/lead.js";
 
 export class LeadsResource {
@@ -132,6 +138,19 @@ export class LeadsResource {
   }
 
   async list(tenantId: string, params: ListLeadsParams = {}): Promise<Lead[]> {
+    const res = await this.listWithPagination(tenantId, params);
+    return res.leads;
+  }
+
+  /**
+   * List leads with the full pagination envelope.
+   *
+   * GET /api/v1/leads
+   *
+   * Unlike list() which returns Lead[], this preserves { leads, total, page, totalPages }
+   * for callers that need pagination metadata (e.g., Newsletter Studio's lead browser).
+   */
+  async listWithPagination(tenantId: string, params: ListLeadsParams = {}): Promise<LeadsPage> {
     const query: Record<string, string | undefined> = {};
     if (params.limit !== undefined) query.limit = String(params.limit);
     if (params.offset !== undefined) query.offset = String(params.offset);
@@ -140,6 +159,7 @@ export class LeadsResource {
     if (params.stage) query.stage = params.stage;
     if (params.sortBy) query.sortBy = params.sortBy;
     if (params.sortOrder) query.sortOrder = params.sortOrder;
+    if (params.agentId) query.agentId = params.agentId;
 
     // The server accepts `search` (case-insensitive contains on email/name) but
     // NOT a standalone `email` query param. Map `email` into `search` so callers
@@ -151,12 +171,17 @@ export class LeadsResource {
       query.search = params.email;
     }
 
-    const res = await this.transport.get<{ leads: Lead[] } | Lead[]>(
+    const res = await this.transport.get<{ leads: Lead[]; total: number; page: number; totalPages: number }>(
       "/leads",
       tenantId,
       query
     );
-    return Array.isArray(res) ? res : res.leads;
+    return {
+      leads: res.leads,
+      total: res.total,
+      page: res.page,
+      totalPages: res.totalPages,
+    };
   }
 
   async applyTags(tenantId: string, id: string, tags: string[]): Promise<void> {
@@ -178,5 +203,77 @@ export class LeadsResource {
       `/leads/${id}/conversion-score`,
       tenantId
     );
+  }
+
+  /**
+   * Remove tags from a lead by tag name.
+   *
+   * DELETE /api/v1/leads/:id/tags
+   *
+   * Sends tag names in the request body. The v1 handler resolves names to IDs
+   * and removes each matching tag from the lead.
+   */
+  async removeTags(tenantId: string, id: string, tags: string[]): Promise<void> {
+    await this.transport.request("DELETE", `/leads/${id}/tags`, {
+      tenantId,
+      body: { tags },
+      timeout: "write",
+    });
+  }
+
+  /**
+   * Fetch recent Milo nurture decisions for a lead.
+   *
+   * GET /api/v1/leads/:id/nurture-decisions
+   *
+   * Used by Newsletter Studio's editorial pass (C3) to provide decision history
+   * context to Milo when generating personalized content.
+   * Returns empty array on 404 (lead has no decisions yet).
+   */
+  async getNurtureDecisions(
+    tenantId: string,
+    id: string,
+    params: NurtureDecisionParams = {}
+  ): Promise<NurtureDecision[]> {
+    const query: Record<string, string | undefined> = {};
+    if (params.limit !== undefined) query.limit = String(params.limit);
+    if (params.action) query.action = params.action;
+
+    const res = await this.transport.get<{
+      decisions: NurtureDecision[];
+      pagination?: unknown;
+    }>(`/leads/${id}/nurture-decisions`, tenantId, query);
+    return res.decisions;
+  }
+
+  /**
+   * Query leads by tag combinations (AND/OR with optional exclusions).
+   *
+   * POST /api/v1/leads/by-tags
+   *
+   * Used for audience segmentation in Newsletter Studio's smart content matching.
+   */
+  async findByTags(tenantId: string, input: FindByTagsInput): Promise<FindByTagsResult> {
+    return this.transport.post<FindByTagsResult>(
+      "/leads/by-tags",
+      tenantId,
+      input
+    );
+  }
+
+  /**
+   * Fetch tags for multiple leads in a single call.
+   *
+   * POST /api/v1/leads/batch/tags
+   *
+   * Returns a map of leadId → Tag[] for all found leads.
+   * Leads not found are silently omitted from the result.
+   */
+  async getBatchTags(tenantId: string, leadIds: string[]): Promise<BatchTagsResult> {
+    const res = await this.transport.post<{
+      success: boolean;
+      data: BatchTagsResult;
+    }>("/leads/batch/tags", tenantId, { leadIds });
+    return res.data;
   }
 }

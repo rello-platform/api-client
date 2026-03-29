@@ -10,6 +10,13 @@ import { CommunicationsResource } from "./resources/communications.js";
 import { PromptsResource } from "./resources/prompts.js";
 import { WebhooksResource } from "./resources/webhooks.js";
 import { PlatformResource } from "./resources/platform.js";
+import { AgentsResource } from "./resources/agents.js";
+import { TagsResource } from "./resources/tags.js";
+import { SegmentsResource } from "./resources/segments.js";
+import { MiloResource } from "./resources/milo.js";
+import { LeadSharesResource } from "./resources/lead-shares.js";
+import { TeamResource } from "./resources/team.js";
+import { ReportsResource } from "./resources/reports.js";
 import type { ServiceClient } from "./service-client.js";
 
 export interface RelloClientConfig {
@@ -51,6 +58,13 @@ export class RelloClient {
   public readonly prompts: PromptsResource;
   public readonly webhooks: WebhooksResource;
   public readonly platform: PlatformResource;
+  public readonly agents: AgentsResource;
+  public readonly tags: TagsResource;
+  public readonly segments: SegmentsResource;
+  public readonly milo: MiloResource;
+  public readonly leadShares: LeadSharesResource;
+  public readonly team: TeamResource;
+  public readonly reports: ReportsResource;
 
   constructor(config: RelloClientConfig = {}) {
     const baseUrl = config.baseUrl
@@ -114,6 +128,13 @@ export class RelloClient {
     this.prompts = new PromptsResource(transport);
     this.webhooks = new WebhooksResource(transport);
     this.platform = new PlatformResource(transport);
+    this.agents = new AgentsResource(transport);
+    this.tags = new TagsResource(transport);
+    this.segments = new SegmentsResource(transport);
+    this.milo = new MiloResource(transport);
+    this.leadShares = new LeadSharesResource(transport);
+    this.team = new TeamResource(transport);
+    this.reports = new ReportsResource(transport);
   }
 
   /**

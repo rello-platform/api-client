@@ -388,6 +388,18 @@ var LeadsResource = class {
     }
   }
   async list(tenantId, params = {}) {
+    const res = await this.listWithPagination(tenantId, params);
+    return res.leads;
+  }
+  /**
+   * List leads with the full pagination envelope.
+   *
+   * GET /api/v1/leads
+   *
+   * Unlike list() which returns Lead[], this preserves { leads, total, page, totalPages }
+   * for callers that need pagination metadata (e.g., Newsletter Studio's lead browser).
+   */
+  async listWithPagination(tenantId, params = {}) {
     const query = {};
     if (params.limit !== void 0) query.limit = String(params.limit);
     if (params.offset !== void 0) query.offset = String(params.offset);
@@ -396,6 +408,7 @@ var LeadsResource = class {
     if (params.stage) query.stage = params.stage;
     if (params.sortBy) query.sortBy = params.sortBy;
     if (params.sortOrder) query.sortOrder = params.sortOrder;
+    if (params.agentId) query.agentId = params.agentId;
     if (params.search) {
       query.search = params.search;
     } else if (params.email) {
@@ -406,7 +419,12 @@ var LeadsResource = class {
       tenantId,
       query
     );
-    return Array.isArray(res) ? res : res.leads;
+    return {
+      leads: res.leads,
+      total: res.total,
+      page: res.page,
+      totalPages: res.totalPages
+    };
   }
   async applyTags(tenantId, id, tags) {
     await this.transport.post(`/leads/${id}/tags`, tenantId, { tags });
@@ -419,6 +437,63 @@ var LeadsResource = class {
       `/leads/${id}/conversion-score`,
       tenantId
     );
+  }
+  /**
+   * Remove tags from a lead by tag name.
+   *
+   * DELETE /api/v1/leads/:id/tags
+   *
+   * Sends tag names in the request body. The v1 handler resolves names to IDs
+   * and removes each matching tag from the lead.
+   */
+  async removeTags(tenantId, id, tags) {
+    await this.transport.request("DELETE", `/leads/${id}/tags`, {
+      tenantId,
+      body: { tags },
+      timeout: "write"
+    });
+  }
+  /**
+   * Fetch recent Milo nurture decisions for a lead.
+   *
+   * GET /api/v1/leads/:id/nurture-decisions
+   *
+   * Used by Newsletter Studio's editorial pass (C3) to provide decision history
+   * context to Milo when generating personalized content.
+   * Returns empty array on 404 (lead has no decisions yet).
+   */
+  async getNurtureDecisions(tenantId, id, params = {}) {
+    const query = {};
+    if (params.limit !== void 0) query.limit = String(params.limit);
+    if (params.action) query.action = params.action;
+    const res = await this.transport.get(`/leads/${id}/nurture-decisions`, tenantId, query);
+    return res.decisions;
+  }
+  /**
+   * Query leads by tag combinations (AND/OR with optional exclusions).
+   *
+   * POST /api/v1/leads/by-tags
+   *
+   * Used for audience segmentation in Newsletter Studio's smart content matching.
+   */
+  async findByTags(tenantId, input) {
+    return this.transport.post(
+      "/leads/by-tags",
+      tenantId,
+      input
+    );
+  }
+  /**
+   * Fetch tags for multiple leads in a single call.
+   *
+   * POST /api/v1/leads/batch/tags
+   *
+   * Returns a map of leadId → Tag[] for all found leads.
+   * Leads not found are silently omitted from the result.
+   */
+  async getBatchTags(tenantId, leadIds) {
+    const res = await this.transport.post("/leads/batch/tags", tenantId, { leadIds });
+    return res.data;
   }
 };
 
@@ -627,12 +702,57 @@ var JourneysResource = class {
   constructor(transport) {
     this.transport = transport;
   }
+  /**
+   * List available journeys for a tenant.
+   *
+   * GET /api/v1/journeys
+   *
+   * For API key callers, returns JourneyTemplate objects (platform-wide templates
+   * available to the tenant). For session callers, returns tenant-specific journeys.
+   */
+  async list(tenantId, params = {}) {
+    const query = {};
+    if (params.isActive !== void 0) query.isActive = String(params.isActive);
+    if (params.includeArchived) query.includeArchived = "true";
+    if (params.search) query.search = params.search;
+    const res = await this.transport.get(
+      "/journeys",
+      tenantId,
+      query
+    );
+    return Array.isArray(res) ? res : res.journeys;
+  }
+  /**
+   * Enroll a lead into a journey by slug.
+   *
+   * POST /api/v1/journeys/enroll
+   *
+   * The server resolves the slug to the tenant's journey instance
+   * (or a cloned platform template).
+   */
   async enroll(tenantId, leadId, journeySlug, context, goalContext) {
     const input = { leadId, journeySlug, context, goalContext };
     const res = await this.transport.post(
       "/journeys/enroll",
       tenantId,
       input
+    );
+    return res.enrollment;
+  }
+  /**
+   * Enroll a lead into a journey by database ID.
+   *
+   * POST /api/v1/journeys/enroll
+   *
+   * Use this when you have the journey's database ID (e.g., from a previous
+   * journeys.list() call). The server verifies the journey belongs to the
+   * tenant and is active.
+   */
+  async enrollById(tenantId, leadId, journeyId, context) {
+    const res = await this.transport.post(
+      "/journeys/enroll",
+      tenantId,
+      { leadId, journeyId, context }
     );
     return res.enrollment;
   }
@@ -910,6 +1030,226 @@ var PlatformResource = class {
   }
 };
 
+// src/resources/agents.ts
+var AgentsResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * Update an agent's profile in Rello.
+   *
+   * PATCH /api/v1/agents/:agentId
+   *
+   * Used by spoke apps to push local profile changes back to the hub
+   * (e.g., Newsletter Studio syncing agent bios, Home Scout syncing photos).
+   */
+  async update(tenantId, agentId, data) {
+    const res = await this.transport.patch(
+      `/agents/${agentId}`,
+      tenantId,
+      data
+    );
+    return res.data;
+  }
+};
+
+// src/resources/tags.ts
+var TagsResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * List all tags for a tenant.
+   *
+   * GET /api/v1/tags
+   */
+  async list(tenantId, params = {}) {
+    const query = {};
+    if (params.category) query.category = params.category;
+    if (params.search) query.search = params.search;
+    if (params.includeArchived) query.includeArchived = "true";
+    const res = await this.transport.get(
+      "/tags",
+      tenantId,
+      query
+    );
+    return Array.isArray(res) ? res : res.tags;
+  }
+  /**
+   * Search tags by name with lead counts.
+   *
+   * GET /api/v1/tags/search
+   *
+   * Performs fuzzy matching on tag name and slug.
+   */
+  async search(tenantId, params = {}) {
+    const query = {};
+    if (params.query) query.q = params.query;
+    if (params.category) query.category = params.category;
+    if (params.limit !== void 0) query.limit = String(params.limit);
+    const res = await this.transport.get(
+      "/tags/search",
+      tenantId,
+      query
+    );
+    return Array.isArray(res) ? res : res.tags;
+  }
+};
+
+// src/resources/segments.ts
+var SegmentsResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * List saved segments for a tenant.
+   *
+   * GET /api/v1/segments
+   */
+  async list(tenantId) {
+    const res = await this.transport.get(
+      "/segments",
+      tenantId
+    );
+    return Array.isArray(res) ? res : res.segments;
+  }
+  /**
+   * Create a new saved segment.
+   *
+   * POST /api/v1/segments
+   */
+  async create(tenantId, data) {
+    const res = await this.transport.post(
+      "/segments",
+      tenantId,
+      data
+    );
+    return "segment" in res ? res.segment : res;
+  }
+};
+
+// src/resources/milo.ts
+var MiloResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * Get AI optimization suggestions for a newsletter.
+   *
+   * POST /api/v1/milo/optimize-newsletter
+   *
+   * Returns subject line suggestions, optimal send time,
+   * content recommendations, and estimated open rate.
+   */
+  async optimizeNewsletter(tenantId, data) {
+    return this.transport.post(
+      "/milo/optimize-newsletter",
+      tenantId,
+      data,
+      "long"
+    );
+  }
+  /**
+   * Get AI content selection for per-lead newsletter personalization.
+   *
+   * POST /api/v1/milo/select-content
+   *
+   * Given a lead and a set of available articles, returns which articles
+   * are most relevant to the lead along with reasoning.
+   */
+  async selectContent(tenantId, data) {
+    return this.transport.post(
+      "/milo/select-content",
+      tenantId,
+      data,
+      "long"
+    );
+  }
+};
+
+// src/resources/lead-shares.ts
+var LeadSharesResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * List lead shares for a tenant.
+   *
+   * GET /api/v1/lead-shares
+   *
+   * Supports filtering by guest MLO, permission level, and newsletter opt-in.
+   * Returns shares with nested lead and sharedBy data.
+   */
+  async list(tenantId, params = {}) {
+    const query = {};
+    if (params.guestMLOId) query.guestMLOId = params.guestMLOId;
+    if (params.permission) query.permission = params.permission;
+    if (params.allowMLONewsletters !== void 0) {
+      query.allowMLONewsletters = String(params.allowMLONewsletters);
+    }
+    if (params.includeRevoked) query.includeRevoked = "true";
+    if (params.limit !== void 0) query.limit = String(params.limit);
+    if (params.offset !== void 0) query.offset = String(params.offset);
+    const res = await this.transport.get("/lead-shares", tenantId, query);
+    return res.data;
+  }
+};
+
+// src/resources/team.ts
+var TeamResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * List all agents in the tenant's team.
+   *
+   * GET /api/v1/team/agents
+   */
+  async listAgents(tenantId) {
+    const res = await this.transport.get("/team/agents", tenantId);
+    return res.data.agents;
+  }
+  /**
+   * Get a single team agent by ID.
+   *
+   * GET /api/v1/team/agents/:agentId
+   */
+  async getAgent(tenantId, agentId) {
+    const res = await this.transport.get(`/team/agents/${agentId}`, tenantId);
+    return res.data;
+  }
+  /**
+   * Get aggregated team statistics.
+   *
+   * GET /api/v1/team/stats
+   */
+  async getStats(tenantId) {
+    const res = await this.transport.get("/team/stats", tenantId);
+    return res.data;
+  }
+};
+
+// src/resources/reports.ts
+var ReportsResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * Ingest a report (daily stats, etc.) into Rello.
+   *
+   * POST /api/v1/reports/ingest
+   *
+   * Fire-and-forget from the caller's perspective — the report is
+   * stored for dashboard display and trend analysis.
+   */
+  async ingest(tenantId, data) {
+    await this.transport.post("/reports/ingest", tenantId, {
+      tenantId,
+      ...data
+    });
+  }
+};
+
 // src/client.ts
 var RelloClient = class {
   constructor(config = {}) {
@@ -950,6 +1290,13 @@ var RelloClient = class {
     this.prompts = new PromptsResource(transport);
     this.webhooks = new WebhooksResource(transport);
     this.platform = new PlatformResource(transport);
+    this.agents = new AgentsResource(transport);
+    this.tags = new TagsResource(transport);
+    this.segments = new SegmentsResource(transport);
+    this.milo = new MiloResource(transport);
+    this.leadShares = new LeadSharesResource(transport);
+    this.team = new TeamResource(transport);
+    this.reports = new ReportsResource(transport);
   }
   /**
    * Resolve a ServiceClient for another platform app by slug.
