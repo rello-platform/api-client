@@ -176,6 +176,10 @@ var Transport = class {
   getAppSlug() {
     return this.appSlug;
   }
+  /** Returns the API key used for Authorization headers. Used by PlatformResource to create ServiceClients. */
+  getApiKey() {
+    return this.apiKey;
+  }
   /**
    * Make an authenticated request to Rello.
    */
@@ -732,48 +736,6 @@ var WebhooksResource = class {
   }
 };
 
-// src/client.ts
-var RelloClient = class {
-  constructor(config = {}) {
-    const baseUrl = config.baseUrl ?? process.env.RELLO_API_URL ?? "";
-    const apiKey = config.apiKey ?? process.env.RELLO_API_KEY ?? process.env.RELLO_APP_SECRET ?? "";
-    const appSlug = config.appSlug ?? process.env.APP_SLUG ?? process.env.RELLO_APP_SLUG ?? "";
-    if (!baseUrl) {
-      throw new Error(
-        "@rello-platform/api-client: baseUrl is required. Set RELLO_API_URL env var or pass baseUrl in config."
-      );
-    }
-    if (!apiKey) {
-      throw new Error(
-        "@rello-platform/api-client: apiKey is required. Set RELLO_API_KEY env var or pass apiKey in config."
-      );
-    }
-    const rawSignalKey = config.signalKey || process.env.RELLO_SIGNAL_KEY || process.env.SIGNAL_ROUTER_SECRET || "";
-    const signalKey = rawSignalKey.trim() || void 0;
-    const normalizedBaseUrl = baseUrl.replace(/\/api\/?$/, "");
-    const transport = new Transport({
-      baseUrl: normalizedBaseUrl,
-      apiKey,
-      appSlug,
-      timeouts: config.timeouts,
-      retryAttempts: config.retryAttempts,
-      circuitBreakerThreshold: config.circuitBreakerThreshold,
-      circuitBreakerCooldownMs: config.circuitBreakerCooldownMs
-    });
-    this.leads = new LeadsResource(transport);
-    this.signals = new SignalsResource(transport, signalKey);
-    this.events = new EventsResource(transport);
-    this.activities = new ActivitiesResource(transport);
-    this.flows = new FlowsResource(transport);
-    this.journeys = new JourneysResource(transport);
-    this.settings = new SettingsResource(transport);
-    this.billing = new BillingResource(transport);
-    this.communications = new CommunicationsResource(transport);
-    this.prompts = new PromptsResource(transport);
-    this.webhooks = new WebhooksResource(transport);
-  }
-};
-
 // src/service-client.ts
 import { randomUUID as randomUUID2 } from "crypto";
 var ServiceClient = class {
@@ -862,6 +824,130 @@ var ServiceClient = class {
         }
       }, this.retryAttempts)
     );
+  }
+};
+
+// src/resources/platform.ts
+var CACHE_TTL_MS = 5 * 60 * 1e3;
+var PlatformResource = class {
+  constructor(transport) {
+    this.transport = transport;
+    /** In-memory cache: slug → { app, expiresAt }. */
+    this.appCache = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Look up a registered platform app by slug.
+   *
+   * Calls `GET /api/v1/platform/apps/{slug}` on cache miss or stale.
+   * Only returns STABLE and BETA apps — DEVELOPMENT/DEPRECATED/RETIRED
+   * return RelloNotFoundError (404).
+   *
+   * @throws {RelloNotFoundError} If the app doesn't exist or isn't production-ready.
+   *
+   * @example
+   *   const pe = await rello.platform.getApp("property-engine");
+   *   console.log(pe.baseUrl); // "https://property-engine-production.up.railway.app"
+   */
+  async getApp(slug) {
+    const cached = this.appCache.get(slug);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.app;
+    }
+    const res = await this.transport.get(
+      `/platform/apps/${slug}`,
+      ""
+    );
+    const app = res.app;
+    this.appCache.set(slug, {
+      app,
+      expiresAt: Date.now() + CACHE_TTL_MS
+    });
+    return app;
+  }
+  /**
+   * Resolve a ServiceClient for a registered platform app.
+   *
+   * Looks up the app's baseUrl from the registry and creates a ServiceClient
+   * with retry + circuit breaker. The ServiceClient uses the same API key
+   * as the RelloClient — spoke-to-spoke auth is validated by the receiving
+   * app (which fetches authorized key hashes from Rello's service-keys endpoint).
+   *
+   * @throws {Error} If the app has no baseUrl configured.
+   * @throws {RelloNotFoundError} If the app doesn't exist or isn't production-ready.
+   *
+   * @example
+   *   const pe = await rello.platform.resolveService("property-engine");
+   *   const data = await pe.get("/api/lookups/123");
+   */
+  async resolveService(slug) {
+    const app = await this.getApp(slug);
+    if (!app.baseUrl) {
+      throw new Error(
+        `@rello-platform/api-client: App '${slug}' has no baseUrl configured in the registry`
+      );
+    }
+    return new ServiceClient({
+      baseUrl: app.baseUrl,
+      apiKey: this.transport.getApiKey(),
+      appSlug: this.transport.getAppSlug()
+    });
+  }
+};
+
+// src/client.ts
+var RelloClient = class {
+  constructor(config = {}) {
+    const baseUrl = config.baseUrl ?? process.env.RELLO_API_URL ?? "";
+    const apiKey = config.apiKey ?? process.env.RELLO_API_KEY ?? process.env.RELLO_APP_SECRET ?? "";
+    const appSlug = config.appSlug ?? process.env.APP_SLUG ?? process.env.RELLO_APP_SLUG ?? "";
+    if (!baseUrl) {
+      throw new Error(
+        "@rello-platform/api-client: baseUrl is required. Set RELLO_API_URL env var or pass baseUrl in config."
+      );
+    }
+    if (!apiKey) {
+      throw new Error(
+        "@rello-platform/api-client: apiKey is required. Set RELLO_API_KEY env var or pass apiKey in config."
+      );
+    }
+    const rawSignalKey = config.signalKey || process.env.RELLO_SIGNAL_KEY || process.env.SIGNAL_ROUTER_SECRET || "";
+    const signalKey = rawSignalKey.trim() || void 0;
+    const normalizedBaseUrl = baseUrl.replace(/\/api\/?$/, "");
+    const transport = new Transport({
+      baseUrl: normalizedBaseUrl,
+      apiKey,
+      appSlug,
+      timeouts: config.timeouts,
+      retryAttempts: config.retryAttempts,
+      circuitBreakerThreshold: config.circuitBreakerThreshold,
+      circuitBreakerCooldownMs: config.circuitBreakerCooldownMs
+    });
+    this.leads = new LeadsResource(transport);
+    this.signals = new SignalsResource(transport, signalKey);
+    this.events = new EventsResource(transport);
+    this.activities = new ActivitiesResource(transport);
+    this.flows = new FlowsResource(transport);
+    this.journeys = new JourneysResource(transport);
+    this.settings = new SettingsResource(transport);
+    this.billing = new BillingResource(transport);
+    this.communications = new CommunicationsResource(transport);
+    this.prompts = new PromptsResource(transport);
+    this.webhooks = new WebhooksResource(transport);
+    this.platform = new PlatformResource(transport);
+  }
+  /**
+   * Resolve a ServiceClient for another platform app by slug.
+   *
+   * Looks up the app's URL from Rello's registry (cached 5 min) and returns
+   * a ServiceClient with retry + circuit breaker. Eliminates the need for
+   * per-service URL env vars.
+   *
+   * @example
+   *   const pe = await rello.service("property-engine");
+   *   const data = await pe.get("/api/lookups/123");
+   */
+  async service(slug) {
+    return this.platform.resolveService(slug);
   }
 };
 

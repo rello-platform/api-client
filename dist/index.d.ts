@@ -24,6 +24,8 @@ declare class Transport {
     constructor(config: TransportConfig);
     /** Returns the app slug used for X-App-Slug header and signal source attribution. */
     getAppSlug(): string;
+    /** Returns the API key used for Authorization headers. Used by PlatformResource to create ServiceClients. */
+    getApiKey(): string;
     /**
      * Make an authenticated request to Rello.
      */
@@ -469,6 +471,96 @@ declare class WebhooksResource {
     documentUpload(tenantId: string, payload: Record<string, unknown>): Promise<void>;
 }
 
+/** Info about a registered platform app, returned by the app registry endpoint. */
+interface AppInfo {
+    /** Unique slug identifier (e.g., "property-engine"). */
+    slug: string;
+    /** Human-readable name (e.g., "Property Engine"). */
+    name: string;
+    /** Production base URL (e.g., "https://property-engine-production.up.railway.app"). Null if not configured. */
+    baseUrl: string | null;
+    /** Health check URL. Null if not configured. */
+    healthUrl: string | null;
+    /** App status: "STABLE", "BETA", etc. DEVELOPMENT/DEPRECATED/RETIRED are not returned (404). */
+    status: string;
+    /** Normalized source key for signal routing (e.g., "PROPERTY_ENGINE"). Null if not set. */
+    appSourceKey: string | null;
+}
+
+interface ServiceClientConfig {
+    /** Base URL of the target service (e.g., process.env.NEWSLETTER_STUDIO_URL). */
+    baseUrl: string;
+    /** API key for the target service. */
+    apiKey: string;
+    /** This app's slug, sent as X-App-Slug. */
+    appSlug: string;
+    /** Request timeout in milliseconds. Default: 10000. */
+    timeoutMs?: number;
+    /** Number of retry attempts. Default: 3. */
+    retryAttempts?: number;
+}
+/**
+ * Generic service-to-service client for spoke-to-spoke calls.
+ * Provides the same retry, circuit breaker, and error handling
+ * as the Rello client, but targets any platform service.
+ */
+declare class ServiceClient {
+    private readonly baseUrl;
+    private readonly apiKey;
+    private readonly appSlug;
+    private readonly timeoutMs;
+    private readonly retryAttempts;
+    private readonly circuitBreaker;
+    constructor(config: ServiceClientConfig);
+    post<T>(path: string, body: unknown, tenantId?: string): Promise<T>;
+    get<T>(path: string, tenantId?: string): Promise<T>;
+    patch<T>(path: string, body: unknown, tenantId?: string): Promise<T>;
+    private request;
+}
+
+/**
+ * Platform resource — app registry lookups and service resolution.
+ *
+ * Enables spoke apps to discover service URLs from Rello instead of
+ * hardcoded env vars. Results are cached for 5 minutes.
+ */
+declare class PlatformResource {
+    private readonly transport;
+    /** In-memory cache: slug → { app, expiresAt }. */
+    private readonly appCache;
+    constructor(transport: Transport);
+    /**
+     * Look up a registered platform app by slug.
+     *
+     * Calls `GET /api/v1/platform/apps/{slug}` on cache miss or stale.
+     * Only returns STABLE and BETA apps — DEVELOPMENT/DEPRECATED/RETIRED
+     * return RelloNotFoundError (404).
+     *
+     * @throws {RelloNotFoundError} If the app doesn't exist or isn't production-ready.
+     *
+     * @example
+     *   const pe = await rello.platform.getApp("property-engine");
+     *   console.log(pe.baseUrl); // "https://property-engine-production.up.railway.app"
+     */
+    getApp(slug: string): Promise<AppInfo>;
+    /**
+     * Resolve a ServiceClient for a registered platform app.
+     *
+     * Looks up the app's baseUrl from the registry and creates a ServiceClient
+     * with retry + circuit breaker. The ServiceClient uses the same API key
+     * as the RelloClient — spoke-to-spoke auth is validated by the receiving
+     * app (which fetches authorized key hashes from Rello's service-keys endpoint).
+     *
+     * @throws {Error} If the app has no baseUrl configured.
+     * @throws {RelloNotFoundError} If the app doesn't exist or isn't production-ready.
+     *
+     * @example
+     *   const pe = await rello.platform.resolveService("property-engine");
+     *   const data = await pe.get("/api/lookups/123");
+     */
+    resolveService(slug: string): Promise<ServiceClient>;
+}
+
 interface RelloClientConfig {
     /** Rello API base URL. Default: RELLO_API_URL env var. Must NOT include "/api". */
     baseUrl?: string;
@@ -506,38 +598,20 @@ declare class RelloClient {
     readonly communications: CommunicationsResource;
     readonly prompts: PromptsResource;
     readonly webhooks: WebhooksResource;
+    readonly platform: PlatformResource;
     constructor(config?: RelloClientConfig);
-}
-
-interface ServiceClientConfig {
-    /** Base URL of the target service (e.g., process.env.NEWSLETTER_STUDIO_URL). */
-    baseUrl: string;
-    /** API key for the target service. */
-    apiKey: string;
-    /** This app's slug, sent as X-App-Slug. */
-    appSlug: string;
-    /** Request timeout in milliseconds. Default: 10000. */
-    timeoutMs?: number;
-    /** Number of retry attempts. Default: 3. */
-    retryAttempts?: number;
-}
-/**
- * Generic service-to-service client for spoke-to-spoke calls.
- * Provides the same retry, circuit breaker, and error handling
- * as the Rello client, but targets any platform service.
- */
-declare class ServiceClient {
-    private readonly baseUrl;
-    private readonly apiKey;
-    private readonly appSlug;
-    private readonly timeoutMs;
-    private readonly retryAttempts;
-    private readonly circuitBreaker;
-    constructor(config: ServiceClientConfig);
-    post<T>(path: string, body: unknown, tenantId?: string): Promise<T>;
-    get<T>(path: string, tenantId?: string): Promise<T>;
-    patch<T>(path: string, body: unknown, tenantId?: string): Promise<T>;
-    private request;
+    /**
+     * Resolve a ServiceClient for another platform app by slug.
+     *
+     * Looks up the app's URL from Rello's registry (cached 5 min) and returns
+     * a ServiceClient with retry + circuit breaker. Eliminates the need for
+     * per-service URL env vars.
+     *
+     * @example
+     *   const pe = await rello.service("property-engine");
+     *   const data = await pe.get("/api/lookups/123");
+     */
+    service(slug: string): Promise<ServiceClient>;
 }
 
 /**
@@ -680,4 +754,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type Lead, type ListLeadsParams, type PlatformCaller, type PlatformKeyValidatorConfig, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, ServiceClient, type ServiceClientConfig, type UpdateLeadInput, type UsageInput, createPlatformKeyValidator, createRelloClient, createServiceClient };
+export { type AppInfo, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type Lead, type ListLeadsParams, type PlatformCaller, type PlatformKeyValidatorConfig, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, ServiceClient, type ServiceClientConfig, type UpdateLeadInput, type UsageInput, createPlatformKeyValidator, createRelloClient, createServiceClient };

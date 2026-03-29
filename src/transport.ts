@@ -63,6 +63,11 @@ export class Transport {
     return this.appSlug;
   }
 
+  /** Returns the API key used for Authorization headers. Used by PlatformResource to create ServiceClients. */
+  getApiKey(): string {
+    return this.apiKey;
+  }
+
   /**
    * Make an authenticated request to Rello.
    */

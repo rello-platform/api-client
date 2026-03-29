@@ -41,3 +41,7 @@ export type {
 export type {
   CreateActivityInput,
 } from "./activity.js";
+
+export type {
+  AppInfo,
+} from "./platform.js";

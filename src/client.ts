@@ -9,6 +9,8 @@ import { BillingResource } from "./resources/billing.js";
 import { CommunicationsResource } from "./resources/communications.js";
 import { PromptsResource } from "./resources/prompts.js";
 import { WebhooksResource } from "./resources/webhooks.js";
+import { PlatformResource } from "./resources/platform.js";
+import type { ServiceClient } from "./service-client.js";
 
 export interface RelloClientConfig {
   /** Rello API base URL. Default: RELLO_API_URL env var. Must NOT include "/api". */
@@ -48,6 +50,7 @@ export class RelloClient {
   public readonly communications: CommunicationsResource;
   public readonly prompts: PromptsResource;
   public readonly webhooks: WebhooksResource;
+  public readonly platform: PlatformResource;
 
   constructor(config: RelloClientConfig = {}) {
     const baseUrl = config.baseUrl
@@ -110,5 +113,21 @@ export class RelloClient {
     this.communications = new CommunicationsResource(transport);
     this.prompts = new PromptsResource(transport);
     this.webhooks = new WebhooksResource(transport);
+    this.platform = new PlatformResource(transport);
+  }
+
+  /**
+   * Resolve a ServiceClient for another platform app by slug.
+   *
+   * Looks up the app's URL from Rello's registry (cached 5 min) and returns
+   * a ServiceClient with retry + circuit breaker. Eliminates the need for
+   * per-service URL env vars.
+   *
+   * @example
+   *   const pe = await rello.service("property-engine");
+   *   const data = await pe.get("/api/lookups/123");
+   */
+  async service(slug: string): Promise<ServiceClient> {
+    return this.platform.resolveService(slug);
   }
 }

@@ -78,4 +78,5 @@ export type {
   CanSendInput,
   CanSendResult,
   CreateActivityInput,
+  AppInfo,
 } from "./types/index.js";
