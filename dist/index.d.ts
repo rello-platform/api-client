@@ -22,6 +22,8 @@ declare class Transport {
     private readonly retryAttempts;
     private readonly circuitBreaker;
     constructor(config: TransportConfig);
+    /** Returns the app slug used for X-App-Slug header and signal source attribution. */
+    getAppSlug(): string;
     /**
      * Make an authenticated request to Rello.
      */
@@ -110,26 +112,160 @@ declare class LeadsResource {
     create(tenantId: string, data: CreateLeadInput): Promise<Lead>;
     get(tenantId: string, id: string): Promise<Lead>;
     update(tenantId: string, id: string, data: UpdateLeadInput): Promise<Lead>;
+    /**
+     * Find a lead by exact email match.
+     *
+     * Implementation: uses the `search` query param (case-insensitive `contains`
+     * on email, firstName, and lastName in Rello's getLeads) then verifies exact
+     * email match client-side. Returns null if no lead with that exact email exists.
+     *
+     * Uses limit=25 to reduce the chance of the exact match being pushed out of
+     * results by partial first/last name matches. A full email address as the search
+     * term rarely produces more than a few hits, but defensive limit is warranted.
+     */
     findByEmail(tenantId: string, email: string): Promise<Lead | null>;
+    /**
+     * Find an existing lead by email, or create a new one if not found.
+     *
+     * Deduplication is by exact email match (case-insensitive). If the input
+     * has no email, a new lead is always created (cannot dedup without email).
+     *
+     * Handles the TOCTOU race condition: if another process creates the same
+     * lead between our findByEmail and create calls, and Rello returns a
+     * conflict (409) or validation error (400), we retry findByEmail once.
+     * This prevents duplicate creation under concurrent writes.
+     *
+     * @returns The lead and whether it was newly created.
+     *
+     * @example
+     *   const { lead, created } = await rello.leads.createOrFind(tenantId, {
+     *     email: "buyer@example.com",
+     *     firstName: "Jane",
+     *     source: "the-home-scout",
+     *   });
+     *   if (!created) console.log("Existing lead:", lead.id);
+     */
+    createOrFind(tenantId: string, data: CreateLeadInput): Promise<{
+        lead: Lead;
+        created: boolean;
+    }>;
     list(tenantId: string, params?: ListLeadsParams): Promise<Lead[]>;
     applyTags(tenantId: string, id: string, tags: string[]): Promise<void>;
     setCustomFields(tenantId: string, id: string, fields: Record<string, unknown>): Promise<void>;
     getConversionScore(tenantId: string, id: string): Promise<ConversionScore>;
 }
 
+/**
+ * Input for emitting a single signal to Rello's signal router.
+ *
+ * Field names match Rello's POST /api/signals contract:
+ *   - `signalType` (not "type") — Rello returns 400 if missing
+ *   - `leadId` (required) — Rello returns 400 if missing
+ *   - `payload` (not "data") — Rello returns 400 if missing or non-object
+ *   - `source` — Rello returns 400 if missing; auto-filled from appSlug
+ */
 interface EmitSignalInput {
-    type: string;
-    leadId?: string;
-    priority?: "low" | "normal" | "high" | "critical";
-    data?: Record<string, unknown>;
+    /** Signal type identifier. Use dotted notation for namespacing (e.g., "homeready.assessment_completed"). */
+    signalType: string;
+    /** Rello lead ID this signal relates to. */
+    leadId: string;
+    /** Signal priority. The batch endpoint maps "NORMAL" to "MEDIUM" internally. */
+    priority?: "CRITICAL" | "HIGH" | "MEDIUM" | "NORMAL" | "LOW";
+    /** Arbitrary signal data. Sent as the `payload` field to Rello. */
+    payload?: Record<string, unknown>;
+    /** Custom fields to merge into the lead's customFields on Rello. Embedded inside `payload.customFields` before send. */
+    customFields?: Record<string, unknown>;
+    /** Source app identifier. Defaults to the client's appSlug if omitted. */
     source?: string;
+    /** ISO 8601 timestamp. Used by the batch endpoint. Defaults to now if omitted. */
+    timestamp?: string;
+}
+/** Result from a batch signal emission. */
+interface EmitSignalBatchResult {
+    /** Number of signals successfully processed by Rello. */
+    processed: number;
+    /** Number of signals that failed processing. */
+    failed: number;
+    /** Total signals submitted. */
+    total: number;
+    /**
+     * Per-signal error details. Present only when emitBatch falls back to
+     * sequential individual calls (no signalKey configured). Apps can use
+     * this to build dead-letter queues for failed signals.
+     *
+     * Not present when the batch endpoint is used directly — the server
+     * returns only aggregate counts.
+     */
+    errors?: Array<{
+        signalType: string;
+        leadId: string;
+        error: string;
+    }>;
 }
 
+/**
+ * Signal emission resource.
+ *
+ * Single signals are sent to POST /api/v1/signals (v1 auth via database API key).
+ * Batch signals are sent to POST /api/v1/signals/batch (requires signalKey —
+ * a separate SIGNAL_ROUTER_SECRET credential). If no signalKey is configured,
+ * emitBatch falls back to sequential single-signal calls.
+ */
 declare class SignalsResource {
     private readonly transport;
-    constructor(transport: Transport);
+    private readonly signalKey;
+    constructor(transport: Transport, signalKey: string | undefined);
+    /**
+     * Emit a single signal to Rello's signal router.
+     *
+     * Uses the standard v1 API key auth (same as leads, events, etc.).
+     * The `source` field defaults to the client's appSlug if not provided.
+     * If `customFields` is provided, it is embedded inside `payload.customFields`.
+     *
+     * @throws {Error} If signalType or leadId is missing (validates locally before sending).
+     *
+     * @example
+     *   await rello.signals.emit(tenantId, {
+     *     signalType: "homeready.assessment_completed",
+     *     leadId: "lead_abc123",
+     *     payload: { score: 72 },
+     *     customFields: { hr_score: 72 },
+     *   });
+     */
     emit(tenantId: string, signal: EmitSignalInput): Promise<void>;
-    emitBatch(tenantId: string, signals: EmitSignalInput[]): Promise<void>;
+    /**
+     * Emit multiple signals in a single HTTP call.
+     *
+     * Requires `signalKey` in the client config (or RELLO_SIGNAL_KEY / SIGNAL_ROUTER_SECRET
+     * env var). The batch endpoint uses a different auth credential than the standard v1 API.
+     *
+     * If no signalKey is configured, falls back to sequential single-signal calls
+     * using the standard v1 auth. This is slower (N HTTP calls) but works without
+     * the separate credential.
+     *
+     * Maximum 200 signals per call (enforced by Rello's batch endpoint). For larger
+     * batches, call emitBatch multiple times.
+     *
+     * @example
+     *   const result = await rello.signals.emitBatch(tenantId, [
+     *     { signalType: "email_opened", leadId: "lead_1", payload: { articleId: "a1" } },
+     *     { signalType: "email_clicked", leadId: "lead_2", payload: { url: "..." } },
+     *   ]);
+     *   console.log(result); // { processed: 2, failed: 0, total: 2 }
+     */
+    emitBatch(tenantId: string, signals: EmitSignalInput[]): Promise<EmitSignalBatchResult>;
+    /**
+     * Batch endpoint: POST /api/v1/signals/batch
+     * Auth: Bearer {signalKey} (SIGNAL_ROUTER_SECRET, NOT the standard API key)
+     */
+    private emitBatchDirect;
+    /**
+     * Fallback: send each signal individually via the single-signal endpoint.
+     * Slower (N HTTP calls) but works with standard v1 API key auth.
+     *
+     * Collects per-signal errors so callers can build dead-letter queues.
+     */
+    private emitBatchFallback;
 }
 
 interface CreateEventInput {
@@ -313,6 +449,15 @@ interface RelloClientConfig {
     apiKey?: string;
     /** This app's slug identifier. Default: APP_SLUG env var. */
     appSlug?: string;
+    /**
+     * Signal router secret for batch signal emission.
+     * Default: RELLO_SIGNAL_KEY or SIGNAL_ROUTER_SECRET env var.
+     *
+     * The batch signal endpoint (/api/signals/batch) uses a different credential
+     * than the standard v1 API. If not set, emitBatch() falls back to sequential
+     * single-signal calls using the standard API key.
+     */
+    signalKey?: string;
     /** Per-method timeout overrides in milliseconds. */
     timeouts?: Partial<TransportConfig["timeouts"]>;
     /** Number of retry attempts for transient errors. Default: 3. */
@@ -508,4 +653,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type EffectiveSettings, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type Lead, type ListLeadsParams, type PlatformCaller, type PlatformKeyValidatorConfig, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, ServiceClient, type ServiceClientConfig, type UpdateLeadInput, type UsageInput, createPlatformKeyValidator, createRelloClient, createServiceClient };
+export { type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type Lead, type ListLeadsParams, type PlatformCaller, type PlatformKeyValidatorConfig, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, ServiceClient, type ServiceClientConfig, type UpdateLeadInput, type UsageInput, createPlatformKeyValidator, createRelloClient, createServiceClient };

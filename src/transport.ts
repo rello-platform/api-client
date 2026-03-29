@@ -58,6 +58,11 @@ export class Transport {
     );
   }
 
+  /** Returns the app slug used for X-App-Slug header and signal source attribution. */
+  getAppSlug(): string {
+    return this.appSlug;
+  }
+
   /**
    * Make an authenticated request to Rello.
    */

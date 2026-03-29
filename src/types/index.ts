@@ -8,6 +8,7 @@ export type {
 
 export type {
   EmitSignalInput,
+  EmitSignalBatchResult,
 } from "./signal.js";
 
 export type {

@@ -172,6 +172,10 @@ var Transport = class {
       config.circuitBreakerCooldownMs ?? 3e4
     );
   }
+  /** Returns the app slug used for X-App-Slug header and signal source attribution. */
+  getAppSlug() {
+    return this.appSlug;
+  }
   /**
    * Make an authenticated request to Rello.
    */
@@ -304,18 +308,77 @@ var LeadsResource = class {
     );
     return "lead" in res ? res.lead : res;
   }
+  /**
+   * Find a lead by exact email match.
+   *
+   * Implementation: uses the `search` query param (case-insensitive `contains`
+   * on email, firstName, and lastName in Rello's getLeads) then verifies exact
+   * email match client-side. Returns null if no lead with that exact email exists.
+   *
+   * Uses limit=25 to reduce the chance of the exact match being pushed out of
+   * results by partial first/last name matches. A full email address as the search
+   * term rarely produces more than a few hits, but defensive limit is warranted.
+   */
   async findByEmail(tenantId, email) {
+    if (!email) return null;
     try {
       const res = await this.transport.get(
         "/leads",
         tenantId,
-        { email }
+        { search: email, limit: "25" }
       );
       const leads = Array.isArray(res) ? res : res.leads;
-      return leads.length > 0 ? leads[0] : null;
+      const normalizedEmail = email.toLowerCase().trim();
+      return leads.find(
+        (l) => typeof l.email === "string" && l.email.toLowerCase().trim() === normalizedEmail
+      ) ?? null;
     } catch (error) {
       if (error && typeof error === "object" && "statusCode" in error && error.statusCode === 404) {
         return null;
+      }
+      throw error;
+    }
+  }
+  /**
+   * Find an existing lead by email, or create a new one if not found.
+   *
+   * Deduplication is by exact email match (case-insensitive). If the input
+   * has no email, a new lead is always created (cannot dedup without email).
+   *
+   * Handles the TOCTOU race condition: if another process creates the same
+   * lead between our findByEmail and create calls, and Rello returns a
+   * conflict (409) or validation error (400), we retry findByEmail once.
+   * This prevents duplicate creation under concurrent writes.
+   *
+   * @returns The lead and whether it was newly created.
+   *
+   * @example
+   *   const { lead, created } = await rello.leads.createOrFind(tenantId, {
+   *     email: "buyer@example.com",
+   *     firstName: "Jane",
+   *     source: "the-home-scout",
+   *   });
+   *   if (!created) console.log("Existing lead:", lead.id);
+   */
+  async createOrFind(tenantId, data) {
+    if (data.email) {
+      const existing = await this.findByEmail(tenantId, data.email);
+      if (existing) {
+        return { lead: existing, created: false };
+      }
+    }
+    try {
+      const lead = await this.create(tenantId, data);
+      return { lead, created: true };
+    } catch (error) {
+      if (data.email && error && typeof error === "object" && "statusCode" in error) {
+        const code = error.statusCode;
+        if (code === 409 || code === 400) {
+          const retryFind = await this.findByEmail(tenantId, data.email);
+          if (retryFind) {
+            return { lead: retryFind, created: false };
+          }
+        }
       }
       throw error;
     }
@@ -326,11 +389,14 @@ var LeadsResource = class {
     if (params.offset !== void 0) query.offset = String(params.offset);
     if (params.page !== void 0) query.page = String(params.page);
     if (params.tags?.length) query.tags = params.tags.join(",");
-    if (params.email) query.email = params.email;
-    if (params.search) query.search = params.search;
     if (params.stage) query.stage = params.stage;
     if (params.sortBy) query.sortBy = params.sortBy;
     if (params.sortOrder) query.sortOrder = params.sortOrder;
+    if (params.search) {
+      query.search = params.search;
+    } else if (params.email) {
+      query.search = params.email;
+    }
     const res = await this.transport.get(
       "/leads",
       tenantId,
@@ -353,15 +419,158 @@ var LeadsResource = class {
 };
 
 // src/resources/signals.ts
+var MAX_BATCH_SIZE = 200;
 var SignalsResource = class {
-  constructor(transport) {
+  constructor(transport, signalKey) {
     this.transport = transport;
+    this.signalKey = signalKey;
   }
+  /**
+   * Emit a single signal to Rello's signal router.
+   *
+   * Uses the standard v1 API key auth (same as leads, events, etc.).
+   * The `source` field defaults to the client's appSlug if not provided.
+   * If `customFields` is provided, it is embedded inside `payload.customFields`.
+   *
+   * @throws {Error} If signalType or leadId is missing (validates locally before sending).
+   *
+   * @example
+   *   await rello.signals.emit(tenantId, {
+   *     signalType: "homeready.assessment_completed",
+   *     leadId: "lead_abc123",
+   *     payload: { score: 72 },
+   *     customFields: { hr_score: 72 },
+   *   });
+   */
   async emit(tenantId, signal) {
-    await this.transport.post("/signals", tenantId, signal);
+    if (!signal.signalType) {
+      throw new Error(
+        "@rello-platform/api-client: signals.emit() requires signalType"
+      );
+    }
+    if (!signal.leadId) {
+      throw new Error(
+        "@rello-platform/api-client: signals.emit() requires leadId"
+      );
+    }
+    const source = signal.source || this.transport.getAppSlug();
+    if (!source) {
+      throw new Error(
+        "@rello-platform/api-client: signals.emit() requires source (set appSlug in client config or source in the signal)"
+      );
+    }
+    let payload;
+    if (signal.customFields) {
+      payload = { ...signal.payload ?? {}, customFields: signal.customFields };
+    } else {
+      payload = signal.payload ?? {};
+    }
+    await this.transport.post("/signals", tenantId, {
+      leadId: signal.leadId,
+      source,
+      signalType: signal.signalType,
+      payload
+    });
   }
+  /**
+   * Emit multiple signals in a single HTTP call.
+   *
+   * Requires `signalKey` in the client config (or RELLO_SIGNAL_KEY / SIGNAL_ROUTER_SECRET
+   * env var). The batch endpoint uses a different auth credential than the standard v1 API.
+   *
+   * If no signalKey is configured, falls back to sequential single-signal calls
+   * using the standard v1 auth. This is slower (N HTTP calls) but works without
+   * the separate credential.
+   *
+   * Maximum 200 signals per call (enforced by Rello's batch endpoint). For larger
+   * batches, call emitBatch multiple times.
+   *
+   * @example
+   *   const result = await rello.signals.emitBatch(tenantId, [
+   *     { signalType: "email_opened", leadId: "lead_1", payload: { articleId: "a1" } },
+   *     { signalType: "email_clicked", leadId: "lead_2", payload: { url: "..." } },
+   *   ]);
+   *   console.log(result); // { processed: 2, failed: 0, total: 2 }
+   */
   async emitBatch(tenantId, signals) {
-    await this.transport.post("/signals", tenantId, { signals });
+    if (signals.length === 0) {
+      return { processed: 0, failed: 0, total: 0 };
+    }
+    if (signals.length > MAX_BATCH_SIZE) {
+      throw new Error(
+        `@rello-platform/api-client: emitBatch() accepts at most ${MAX_BATCH_SIZE} signals (received ${signals.length}). Split into multiple calls.`
+      );
+    }
+    if (this.signalKey) {
+      return this.emitBatchDirect(tenantId, signals);
+    }
+    return this.emitBatchFallback(tenantId, signals);
+  }
+  /**
+   * Batch endpoint: POST /api/v1/signals/batch
+   * Auth: Bearer {signalKey} (SIGNAL_ROUTER_SECRET, NOT the standard API key)
+   */
+  async emitBatchDirect(tenantId, signals) {
+    const appSlug = this.transport.getAppSlug();
+    const batchPayload = signals.map((s) => {
+      let payload;
+      if (s.customFields) {
+        payload = { ...s.payload ?? {}, customFields: s.customFields };
+      } else {
+        payload = s.payload ?? {};
+      }
+      return {
+        tenantId,
+        leadId: s.leadId,
+        signalType: s.signalType,
+        priority: s.priority,
+        sourceApp: s.source || appSlug,
+        payload,
+        timestamp: s.timestamp ?? (/* @__PURE__ */ new Date()).toISOString()
+      };
+    });
+    return this.transport.request(
+      "POST",
+      "/signals/batch",
+      {
+        tenantId,
+        body: { signals: batchPayload },
+        timeout: "long",
+        headers: {
+          Authorization: `Bearer ${this.signalKey}`,
+          "X-Source-App": appSlug
+        }
+      }
+    );
+  }
+  /**
+   * Fallback: send each signal individually via the single-signal endpoint.
+   * Slower (N HTTP calls) but works with standard v1 API key auth.
+   *
+   * Collects per-signal errors so callers can build dead-letter queues.
+   */
+  async emitBatchFallback(tenantId, signals) {
+    let processed = 0;
+    let failed = 0;
+    const errors = [];
+    for (const signal of signals) {
+      try {
+        await this.emit(tenantId, signal);
+        processed++;
+      } catch (err) {
+        failed++;
+        errors.push({
+          signalType: signal.signalType,
+          leadId: signal.leadId,
+          error: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+    const result = { processed, failed, total: signals.length };
+    if (errors.length > 0) {
+      result.errors = errors;
+    }
+    return result;
   }
 };
 
@@ -539,6 +748,8 @@ var RelloClient = class {
         "@rello-platform/api-client: apiKey is required. Set RELLO_API_KEY env var or pass apiKey in config."
       );
     }
+    const rawSignalKey = config.signalKey || process.env.RELLO_SIGNAL_KEY || process.env.SIGNAL_ROUTER_SECRET || "";
+    const signalKey = rawSignalKey.trim() || void 0;
     const normalizedBaseUrl = baseUrl.replace(/\/api\/?$/, "");
     const transport = new Transport({
       baseUrl: normalizedBaseUrl,
@@ -550,7 +761,7 @@ var RelloClient = class {
       circuitBreakerCooldownMs: config.circuitBreakerCooldownMs
     });
     this.leads = new LeadsResource(transport);
-    this.signals = new SignalsResource(transport);
+    this.signals = new SignalsResource(transport, signalKey);
     this.events = new EventsResource(transport);
     this.activities = new ActivitiesResource(transport);
     this.flows = new FlowsResource(transport);

@@ -64,6 +64,7 @@ export type {
   ListLeadsParams,
   ConversionScore,
   EmitSignalInput,
+  EmitSignalBatchResult,
   CreateEventInput,
   Event,
   EnrollFlowInput,

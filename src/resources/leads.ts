@@ -32,18 +32,100 @@ export class LeadsResource {
     return "lead" in res ? res.lead : res;
   }
 
+  /**
+   * Find a lead by exact email match.
+   *
+   * Implementation: uses the `search` query param (case-insensitive `contains`
+   * on email, firstName, and lastName in Rello's getLeads) then verifies exact
+   * email match client-side. Returns null if no lead with that exact email exists.
+   *
+   * Uses limit=25 to reduce the chance of the exact match being pushed out of
+   * results by partial first/last name matches. A full email address as the search
+   * term rarely produces more than a few hits, but defensive limit is warranted.
+   */
   async findByEmail(tenantId: string, email: string): Promise<Lead | null> {
+    if (!email) return null;
+
     try {
       const res = await this.transport.get<{ leads: Lead[] } | Lead[]>(
         "/leads",
         tenantId,
-        { email }
+        { search: email, limit: "25" }
       );
       const leads = Array.isArray(res) ? res : res.leads;
-      return leads.length > 0 ? leads[0] : null;
+
+      // The search endpoint does case-insensitive `contains` on email, firstName,
+      // and lastName. Verify exact email match client-side for dedup safety.
+      // Use typeof guard — JSON response may omit the key entirely (undefined at runtime).
+      const normalizedEmail = email.toLowerCase().trim();
+      return leads.find(
+        (l) => typeof l.email === "string" && l.email.toLowerCase().trim() === normalizedEmail
+      ) ?? null;
     } catch (error) {
-      if (error && typeof error === "object" && "statusCode" in error && (error as { statusCode: number }).statusCode === 404) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "statusCode" in error &&
+        (error as { statusCode: number }).statusCode === 404
+      ) {
         return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Find an existing lead by email, or create a new one if not found.
+   *
+   * Deduplication is by exact email match (case-insensitive). If the input
+   * has no email, a new lead is always created (cannot dedup without email).
+   *
+   * Handles the TOCTOU race condition: if another process creates the same
+   * lead between our findByEmail and create calls, and Rello returns a
+   * conflict (409) or validation error (400), we retry findByEmail once.
+   * This prevents duplicate creation under concurrent writes.
+   *
+   * @returns The lead and whether it was newly created.
+   *
+   * @example
+   *   const { lead, created } = await rello.leads.createOrFind(tenantId, {
+   *     email: "buyer@example.com",
+   *     firstName: "Jane",
+   *     source: "the-home-scout",
+   *   });
+   *   if (!created) console.log("Existing lead:", lead.id);
+   */
+  async createOrFind(
+    tenantId: string,
+    data: CreateLeadInput,
+  ): Promise<{ lead: Lead; created: boolean }> {
+    if (data.email) {
+      const existing = await this.findByEmail(tenantId, data.email);
+      if (existing) {
+        return { lead: existing, created: false };
+      }
+    }
+
+    try {
+      const lead = await this.create(tenantId, data);
+      return { lead, created: true };
+    } catch (error) {
+      // TOCTOU race: another process created this lead between our find and create.
+      // Rello may return 409 Conflict or 400 for duplicate email.
+      // Retry findByEmail once before giving up.
+      if (
+        data.email &&
+        error &&
+        typeof error === "object" &&
+        "statusCode" in error
+      ) {
+        const code = (error as { statusCode: number }).statusCode;
+        if (code === 409 || code === 400) {
+          const retryFind = await this.findByEmail(tenantId, data.email);
+          if (retryFind) {
+            return { lead: retryFind, created: false };
+          }
+        }
       }
       throw error;
     }
@@ -55,11 +137,19 @@ export class LeadsResource {
     if (params.offset !== undefined) query.offset = String(params.offset);
     if (params.page !== undefined) query.page = String(params.page);
     if (params.tags?.length) query.tags = params.tags.join(",");
-    if (params.email) query.email = params.email;
-    if (params.search) query.search = params.search;
     if (params.stage) query.stage = params.stage;
     if (params.sortBy) query.sortBy = params.sortBy;
     if (params.sortOrder) query.sortOrder = params.sortOrder;
+
+    // The server accepts `search` (case-insensitive contains on email/name) but
+    // NOT a standalone `email` query param. Map `email` into `search` so callers
+    // using list({ email }) get filtered results instead of silent no-op.
+    // Explicit `search` takes precedence if both are provided.
+    if (params.search) {
+      query.search = params.search;
+    } else if (params.email) {
+      query.search = params.email;
+    }
 
     const res = await this.transport.get<{ leads: Lead[] } | Lead[]>(
       "/leads",

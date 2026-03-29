@@ -17,6 +17,15 @@ export interface RelloClientConfig {
   apiKey?: string;
   /** This app's slug identifier. Default: APP_SLUG env var. */
   appSlug?: string;
+  /**
+   * Signal router secret for batch signal emission.
+   * Default: RELLO_SIGNAL_KEY or SIGNAL_ROUTER_SECRET env var.
+   *
+   * The batch signal endpoint (/api/signals/batch) uses a different credential
+   * than the standard v1 API. If not set, emitBatch() falls back to sequential
+   * single-signal calls using the standard API key.
+   */
+  signalKey?: string;
   /** Per-method timeout overrides in milliseconds. */
   timeouts?: Partial<TransportConfig["timeouts"]>;
   /** Number of retry attempts for transient errors. Default: 3. */
@@ -69,6 +78,14 @@ export class RelloClient {
       );
     }
 
+    // Resolve signal key — used for batch signal endpoint auth.
+    // Treat empty string as unset (env vars can be "" in some runtimes).
+    const rawSignalKey = config.signalKey
+      || process.env.RELLO_SIGNAL_KEY
+      || process.env.SIGNAL_ROUTER_SECRET
+      || "";
+    const signalKey = rawSignalKey.trim() || undefined;
+
     // Strip "/api" suffix from baseUrl — the transport appends "/api/v1" internally
     const normalizedBaseUrl = baseUrl.replace(/\/api\/?$/, "");
 
@@ -83,7 +100,7 @@ export class RelloClient {
     });
 
     this.leads = new LeadsResource(transport);
-    this.signals = new SignalsResource(transport);
+    this.signals = new SignalsResource(transport, signalKey);
     this.events = new EventsResource(transport);
     this.activities = new ActivitiesResource(transport);
     this.flows = new FlowsResource(transport);
