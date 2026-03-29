@@ -12,13 +12,15 @@ export interface CreateEventInput {
 
 export interface Event {
   id: string;
-  leadId: string | null;
+  leadId: string;
   tenantId: string;
   eventType: string;
   sourceApp: string;
   actorType: string;
+  actorId: string | null;
   title: string | null;
   description: string | null;
-  data: Record<string, unknown> | null;
+  eventData: Record<string, unknown>;
+  visibility: string;
   createdAt: string;
 }

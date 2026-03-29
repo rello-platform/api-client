@@ -823,7 +823,88 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /** Query tags for multiple leads */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        leadIds: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Tags by lead */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            data: {
+                                leadTags: {
+                                    [key: string]: components["schemas"]["Tag"][];
+                                };
+                                found: number;
+                                requested: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         /** Bulk apply tags to multiple leads */
         post: {
             parameters: {
@@ -3964,9 +4045,6 @@ export interface components {
             tagIds: string[];
             source?: string;
         };
-        LeadTagsResponse: {
-            tags: components["schemas"]["Tag"][];
-        };
         Tag: {
             id: string;
             name: string;
@@ -3974,6 +4052,9 @@ export interface components {
             category: string | null;
             color: string | null;
             leadCount: number;
+        };
+        LeadTagsResponse: {
+            tags: components["schemas"]["Tag"][];
         };
         LeadTagAddedResponse: {
             tag: {
@@ -4000,16 +4081,18 @@ export interface components {
         };
         Event: {
             id: string;
-            leadId: string | null;
+            leadId: string;
             tenantId: string;
             eventType: string;
-            sourceApp: string | null;
-            actorType: string | null;
+            sourceApp: string;
+            actorType: string;
+            actorId: string | null;
             title: string | null;
             description: string | null;
-            data: {
+            eventData: {
                 [key: string]: unknown;
-            } | null;
+            };
+            visibility: string;
             createdAt: string;
         };
         EventRequest: {

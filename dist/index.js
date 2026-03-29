@@ -486,13 +486,18 @@ var LeadsResource = class {
   /**
    * Fetch tags for multiple leads in a single call.
    *
-   * POST /api/v1/leads/batch/tags
+   * PUT /api/v1/leads/batch/tags
    *
    * Returns a map of leadId → Tag[] for all found leads.
    * Leads not found are silently omitted from the result.
+   * Uses PUT (not GET) because the leadIds array can exceed URL length limits.
    */
   async getBatchTags(tenantId, leadIds) {
-    const res = await this.transport.post("/leads/batch/tags", tenantId, { leadIds });
+    const res = await this.transport.request("PUT", "/leads/batch/tags", {
+      tenantId,
+      body: { leadIds },
+      timeout: "read"
+    });
     return res.data;
   }
 };
