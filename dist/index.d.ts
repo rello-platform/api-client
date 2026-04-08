@@ -192,15 +192,28 @@ declare class LeadsResource {
     get(tenantId: string, id: string): Promise<Lead>;
     update(tenantId: string, id: string, data: UpdateLeadInput): Promise<Lead>;
     /**
-     * Find a lead by exact email match.
+     * Find a lead by exact email match within a tenant.
      *
-     * Implementation: uses the `search` query param (case-insensitive `contains`
-     * on email, firstName, and lastName in Rello's getLeads) then verifies exact
-     * email match client-side. Returns null if no lead with that exact email exists.
+     * Calls `GET /api/v1/leads?email={email}&search={email}` — sends BOTH the
+     * new dedicated `email` query param AND the legacy `search` param so the
+     * lookup works against both new and old Rello servers without coordinated
+     * deployment:
+     *   - New Rello (with `?email=` support): the server applies a
+     *     case-insensitive exact match against the unique `(tenantId, email)`
+     *     index and returns 0 or 1 lead. The redundant `search` filter is
+     *     AND'd in but is a no-op once the email match has constrained the
+     *     result to a single row.
+     *   - Old Rello (pre Spoke App Integration Standard): the server silently
+     *     strips the unknown `email` param and falls back to the legacy
+     *     fuzzy `search` behavior — case-insensitive `contains` across
+     *     firstName/lastName/email. The client-side exact-match filter below
+     *     then validates the result for dedup safety.
      *
-     * Uses limit=25 to reduce the chance of the exact match being pushed out of
-     * results by partial first/last name matches. A full email address as the search
-     * term rarely produces more than a few hits, but defensive limit is warranted.
+     * The dual-param send is a transition aid. It can be reduced to
+     * `{ email }` once every Rello deployment has shipped the new query param
+     * (target: after the v1.x.y rollout completes).
+     *
+     * Returns null when no lead with that exact email exists.
      */
     findByEmail(tenantId: string, email: string): Promise<Lead | null>;
     /**

@@ -39,15 +39,28 @@ export class LeadsResource {
   }
 
   /**
-   * Find a lead by exact email match.
+   * Find a lead by exact email match within a tenant.
    *
-   * Implementation: uses the `search` query param (case-insensitive `contains`
-   * on email, firstName, and lastName in Rello's getLeads) then verifies exact
-   * email match client-side. Returns null if no lead with that exact email exists.
+   * Calls `GET /api/v1/leads?email={email}&search={email}` — sends BOTH the
+   * new dedicated `email` query param AND the legacy `search` param so the
+   * lookup works against both new and old Rello servers without coordinated
+   * deployment:
+   *   - New Rello (with `?email=` support): the server applies a
+   *     case-insensitive exact match against the unique `(tenantId, email)`
+   *     index and returns 0 or 1 lead. The redundant `search` filter is
+   *     AND'd in but is a no-op once the email match has constrained the
+   *     result to a single row.
+   *   - Old Rello (pre Spoke App Integration Standard): the server silently
+   *     strips the unknown `email` param and falls back to the legacy
+   *     fuzzy `search` behavior — case-insensitive `contains` across
+   *     firstName/lastName/email. The client-side exact-match filter below
+   *     then validates the result for dedup safety.
    *
-   * Uses limit=25 to reduce the chance of the exact match being pushed out of
-   * results by partial first/last name matches. A full email address as the search
-   * term rarely produces more than a few hits, but defensive limit is warranted.
+   * The dual-param send is a transition aid. It can be reduced to
+   * `{ email }` once every Rello deployment has shipped the new query param
+   * (target: after the v1.x.y rollout completes).
+   *
+   * Returns null when no lead with that exact email exists.
    */
   async findByEmail(tenantId: string, email: string): Promise<Lead | null> {
     if (!email) return null;
@@ -56,13 +69,18 @@ export class LeadsResource {
       const res = await this.transport.get<{ leads: Lead[] } | Lead[]>(
         "/leads",
         tenantId,
-        { search: email, limit: "25" }
+        { email, search: email, limit: "25" }
       );
       const leads = Array.isArray(res) ? res : res.leads;
 
-      // The search endpoint does case-insensitive `contains` on email, firstName,
-      // and lastName. Verify exact email match client-side for dedup safety.
-      // Use typeof guard — JSON response may omit the key entirely (undefined at runtime).
+      // Defensive client-side exact-match filter. On a new Rello this is a
+      // no-op (server already returned 0 or 1). On an old Rello this is the
+      // primary correctness check — the legacy `search` param returns up to
+      // 25 fuzzy matches and we need the exact one. Also covers the edge
+      // case where @@unique([tenantId, email]) — case-sensitive in Postgres
+      // — allows two emails differing only in case to coexist; in that case
+      // the server's case-insensitive ILIKE match could return both rows
+      // and we take the first.
       const normalizedEmail = email.toLowerCase().trim();
       return leads.find(
         (l) => typeof l.email === "string" && l.email.toLowerCase().trim() === normalizedEmail
@@ -161,10 +179,28 @@ export class LeadsResource {
     if (params.sortOrder) query.sortOrder = params.sortOrder;
     if (params.agentId) query.agentId = params.agentId;
 
-    // The server accepts `search` (case-insensitive contains on email/name) but
-    // NOT a standalone `email` query param. Map `email` into `search` so callers
-    // using list({ email }) get filtered results instead of silent no-op.
-    // Explicit `search` takes precedence if both are provided.
+    // `email` and `search` are now independent server params:
+    //   email  → exact case-insensitive match (returns 0 or 1 lead)
+    //   search → fuzzy contains match across firstName/lastName/email
+    // Both can be passed together; the server AND's them.
+    //
+    // Backwards compat: when the caller passes only `email` (no explicit
+    // `search`), we ALSO send the email as `search`. New Rello applies the
+    // exact email filter and ignores the redundant search clause; old Rello
+    // (pre Spoke App Integration Standard) silently strips the unknown
+    // `email` param and falls back to the search filter — preserving the
+    // legacy behavior of `list({ email })` returning matching leads instead
+    // of an unfiltered list. Once every Rello deployment has shipped the
+    // new query param, the email-as-search fallback can be removed.
+    //
+    // If the caller passes an explicit `search`, that wins — we never
+    // override their intent.
+    //
+    // Behavior change for callers: `list({ email: "fra" })` previously did
+    // a substring match against "francisco@..."; on a new Rello it now does
+    // an exact-match lookup that returns nothing for partial input. Callers
+    // wanting fuzzy behavior should pass `search`, not `email`.
+    if (params.email) query.email = params.email;
     if (params.search) {
       query.search = params.search;
     } else if (params.email) {
