@@ -93,3 +93,21 @@ export type {
 export type {
   ReportIngestInput,
 } from "./report.js";
+
+export type {
+  ProvisionedAgent,
+  TenantEnablePayload,
+  TenantDisablePayload,
+  TenantProvisioningPayload,
+  AgentProvisionPayload,
+} from "./provisioning.js";
+
+export {
+  provisionedAgentSchema,
+  tenantEnablePayloadSchema,
+  tenantDisablePayloadSchema,
+  tenantProvisioningPayloadSchema,
+  agentProvisionPayloadSchema,
+  parseTenantPayload,
+  parseAgentPayload,
+} from "./provisioning.js";

@@ -106,4 +106,20 @@ export type {
   TeamAgent,
   TeamStats,
   ReportIngestInput,
+  ProvisionedAgent,
+  TenantEnablePayload,
+  TenantDisablePayload,
+  TenantProvisioningPayload,
+  AgentProvisionPayload,
+} from "./types/index.js";
+
+// Provisioning schemas + runtime validators
+export {
+  provisionedAgentSchema,
+  tenantEnablePayloadSchema,
+  tenantDisablePayloadSchema,
+  tenantProvisioningPayloadSchema,
+  agentProvisionPayloadSchema,
+  parseTenantPayload,
+  parseAgentPayload,
 } from "./types/index.js";

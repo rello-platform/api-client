@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 interface TransportConfig {
     baseUrl: string;
     apiKey: string;
@@ -1216,6 +1218,232 @@ interface EffectiveSettings {
 }
 
 /**
+ * Shared provisioning payload types for Rello ↔ spoke app communication.
+ *
+ * These schemas define the EXACT shapes that flow across the HTTP boundary
+ * when Rello provisions tenants/agents into spoke apps. Both the Rello
+ * sender and spoke receivers should validate against these schemas.
+ *
+ * PROVISIONING-AUDIT-2026-04-08: This file was created to close the
+ * "type lies across HTTP boundaries" root-cause finding (Stage 7 #5).
+ * Prior to this, each spoke had its own type definitions that had drifted
+ * from what Rello actually sends, causing 8+ CRITICALs across 3 spokes.
+ *
+ * Schema updates MUST be coordinated: changing a field here requires
+ * updating the Rello sender AND rebuilding every spoke that imports it.
+ * CI will catch mismatches at build time.
+ */
+
+/**
+ * Agent fields sent by Rello in provisioning payloads.
+ *
+ * This is the CANONICAL shape. Spoke receivers must NOT assume fields
+ * beyond what's listed here (e.g., HH's old `name` field or `territories`
+ * were never sent by Rello — they were type lies).
+ */
+declare const provisionedAgentSchema: z.ZodObject<{
+    relloAgentId: z.ZodString;
+    email: z.ZodString;
+    firstName: z.ZodString;
+    lastName: z.ZodString;
+    slug: z.ZodString;
+    role: z.ZodString;
+    phone: z.ZodNullable<z.ZodString>;
+    photoUrl: z.ZodOptional<z.ZodString>;
+    bio: z.ZodOptional<z.ZodString>;
+    title: z.ZodOptional<z.ZodString>;
+    tagline: z.ZodOptional<z.ZodString>;
+    brokerageName: z.ZodOptional<z.ZodString>;
+    brokerageLogoUrl: z.ZodOptional<z.ZodString>;
+    brokerageLicenseNumber: z.ZodOptional<z.ZodString>;
+    licenseNumber: z.ZodOptional<z.ZodString>;
+    licenseState: z.ZodOptional<z.ZodString>;
+    nmlsNumber: z.ZodOptional<z.ZodString>;
+    websiteUrl: z.ZodOptional<z.ZodString>;
+    applicationUrl: z.ZodOptional<z.ZodString>;
+    social: z.ZodOptional<z.ZodUnknown>;
+    mloName: z.ZodOptional<z.ZodString>;
+    mloNmls: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+type ProvisionedAgent = z.infer<typeof provisionedAgentSchema>;
+declare const tenantEnablePayloadSchema: z.ZodObject<{
+    action: z.ZodLiteral<"enable">;
+    relloTenantId: z.ZodString;
+    tenant: z.ZodObject<{
+        name: z.ZodString;
+        slug: z.ZodString;
+        logoUrl: z.ZodNullable<z.ZodString>;
+        primaryColor: z.ZodNullable<z.ZodString>;
+        physicalAddress: z.ZodNullable<z.ZodString>;
+        applicationUrl: z.ZodNullable<z.ZodString>;
+        type: z.ZodString;
+        plan: z.ZodString;
+    }, z.core.$strip>;
+    agents: z.ZodArray<z.ZodObject<{
+        relloAgentId: z.ZodString;
+        email: z.ZodString;
+        firstName: z.ZodString;
+        lastName: z.ZodString;
+        slug: z.ZodString;
+        role: z.ZodString;
+        phone: z.ZodNullable<z.ZodString>;
+        photoUrl: z.ZodOptional<z.ZodString>;
+        bio: z.ZodOptional<z.ZodString>;
+        title: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        brokerageName: z.ZodOptional<z.ZodString>;
+        brokerageLogoUrl: z.ZodOptional<z.ZodString>;
+        brokerageLicenseNumber: z.ZodOptional<z.ZodString>;
+        licenseNumber: z.ZodOptional<z.ZodString>;
+        licenseState: z.ZodOptional<z.ZodString>;
+        nmlsNumber: z.ZodOptional<z.ZodString>;
+        websiteUrl: z.ZodOptional<z.ZodString>;
+        applicationUrl: z.ZodOptional<z.ZodString>;
+        social: z.ZodOptional<z.ZodUnknown>;
+        mloName: z.ZodOptional<z.ZodString>;
+        mloNmls: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+type TenantEnablePayload = z.infer<typeof tenantEnablePayloadSchema>;
+declare const tenantDisablePayloadSchema: z.ZodObject<{
+    action: z.ZodLiteral<"disable">;
+    relloTenantId: z.ZodString;
+    reason: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+type TenantDisablePayload = z.infer<typeof tenantDisablePayloadSchema>;
+declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    action: z.ZodLiteral<"enable">;
+    relloTenantId: z.ZodString;
+    tenant: z.ZodObject<{
+        name: z.ZodString;
+        slug: z.ZodString;
+        logoUrl: z.ZodNullable<z.ZodString>;
+        primaryColor: z.ZodNullable<z.ZodString>;
+        physicalAddress: z.ZodNullable<z.ZodString>;
+        applicationUrl: z.ZodNullable<z.ZodString>;
+        type: z.ZodString;
+        plan: z.ZodString;
+    }, z.core.$strip>;
+    agents: z.ZodArray<z.ZodObject<{
+        relloAgentId: z.ZodString;
+        email: z.ZodString;
+        firstName: z.ZodString;
+        lastName: z.ZodString;
+        slug: z.ZodString;
+        role: z.ZodString;
+        phone: z.ZodNullable<z.ZodString>;
+        photoUrl: z.ZodOptional<z.ZodString>;
+        bio: z.ZodOptional<z.ZodString>;
+        title: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        brokerageName: z.ZodOptional<z.ZodString>;
+        brokerageLogoUrl: z.ZodOptional<z.ZodString>;
+        brokerageLicenseNumber: z.ZodOptional<z.ZodString>;
+        licenseNumber: z.ZodOptional<z.ZodString>;
+        licenseState: z.ZodOptional<z.ZodString>;
+        nmlsNumber: z.ZodOptional<z.ZodString>;
+        websiteUrl: z.ZodOptional<z.ZodString>;
+        applicationUrl: z.ZodOptional<z.ZodString>;
+        social: z.ZodOptional<z.ZodUnknown>;
+        mloName: z.ZodOptional<z.ZodString>;
+        mloNmls: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    action: z.ZodLiteral<"disable">;
+    relloTenantId: z.ZodString;
+    reason: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>], "action">;
+type TenantProvisioningPayload = z.infer<typeof tenantProvisioningPayloadSchema>;
+declare const agentProvisionPayloadSchema: z.ZodObject<{
+    action: z.ZodEnum<{
+        add: "add";
+        update: "update";
+        remove: "remove";
+    }>;
+    relloTenantId: z.ZodString;
+    agent: z.ZodObject<{
+        relloAgentId: z.ZodString;
+        email: z.ZodString;
+        firstName: z.ZodString;
+        lastName: z.ZodString;
+        slug: z.ZodString;
+        role: z.ZodString;
+        phone: z.ZodNullable<z.ZodString>;
+        photoUrl: z.ZodOptional<z.ZodString>;
+        bio: z.ZodOptional<z.ZodString>;
+        title: z.ZodOptional<z.ZodString>;
+        tagline: z.ZodOptional<z.ZodString>;
+        brokerageName: z.ZodOptional<z.ZodString>;
+        brokerageLogoUrl: z.ZodOptional<z.ZodString>;
+        brokerageLicenseNumber: z.ZodOptional<z.ZodString>;
+        licenseNumber: z.ZodOptional<z.ZodString>;
+        licenseState: z.ZodOptional<z.ZodString>;
+        nmlsNumber: z.ZodOptional<z.ZodString>;
+        websiteUrl: z.ZodOptional<z.ZodString>;
+        applicationUrl: z.ZodOptional<z.ZodString>;
+        social: z.ZodOptional<z.ZodUnknown>;
+        mloName: z.ZodOptional<z.ZodString>;
+        mloNmls: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>;
+    agentProfile: z.ZodOptional<z.ZodObject<{
+        specialtySentence: z.ZodOptional<z.ZodString>;
+        experienceStatement: z.ZodOptional<z.ZodString>;
+        typicalClient: z.ZodOptional<z.ZodUnknown>;
+        areasServed: z.ZodOptional<z.ZodUnknown>;
+        designations: z.ZodOptional<z.ZodUnknown>;
+        emailTone: z.ZodOptional<z.ZodString>;
+        soloOrTeam: z.ZodOptional<z.ZodString>;
+        preferredContactMethod: z.ZodOptional<z.ZodString>;
+        calendarLink: z.ZodOptional<z.ZodString>;
+        aboutMeFacts: z.ZodOptional<z.ZodUnknown>;
+        avoidTopics: z.ZodOptional<z.ZodUnknown>;
+        emphasizeTopics: z.ZodOptional<z.ZodUnknown>;
+        sensitiveTopics: z.ZodOptional<z.ZodUnknown>;
+        introductionDraft: z.ZodOptional<z.ZodString>;
+        signoffStyle: z.ZodOptional<z.ZodString>;
+        successStorySeeds: z.ZodOptional<z.ZodUnknown>;
+        sendFrequency: z.ZodOptional<z.ZodString>;
+        newsletterTemplateId: z.ZodOptional<z.ZodString>;
+        brandColors: z.ZodOptional<z.ZodUnknown>;
+        leadSourceContext: z.ZodOptional<z.ZodUnknown>;
+    }, z.core.$strip>>;
+    wizardAnswers: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        questionId: z.ZodString;
+        question: z.ZodString;
+        answer: z.ZodUnknown;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
+type AgentProvisionPayload = z.infer<typeof agentProvisionPayloadSchema>;
+/**
+ * Parse and validate an incoming tenant provisioning request body.
+ * Returns the typed payload on success, or an error message on failure.
+ *
+ * Usage in a spoke receiver:
+ * ```ts
+ * const result = parseTenantPayload(await req.json());
+ * if (!result.success) return badRequestResponse(result.error);
+ * const payload = result.data;
+ * ```
+ */
+declare function parseTenantPayload(body: unknown): {
+    success: true;
+    data: TenantProvisioningPayload;
+} | {
+    success: false;
+    error: string;
+};
+/**
+ * Parse and validate an incoming agent provisioning request body.
+ */
+declare function parseAgentPayload(body: unknown): {
+    success: true;
+    data: AgentProvisionPayload;
+} | {
+    success: false;
+    error: string;
+};
+
+/**
  * Create a typed Rello API client. Reads config from env vars by default:
  *   RELLO_API_URL  — base URL (must NOT include "/api")
  *   RELLO_API_KEY  — API key (falls back to RELLO_APP_SECRET)
@@ -1240,4 +1468,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type Agent, type AppInfo, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type PlatformCaller, type PlatformKeyValidatorConfig, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, createPlatformKeyValidator, createRelloClient, createServiceClient };
+export { type Agent, type AgentProvisionPayload, type AppInfo, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, agentProvisionPayloadSchema, createPlatformKeyValidator, createRelloClient, createServiceClient, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };

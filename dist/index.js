@@ -1411,6 +1411,113 @@ function createPlatformKeyValidator(config) {
   };
 }
 
+// src/types/provisioning.ts
+import { z } from "zod";
+var provisionedAgentSchema = z.object({
+  relloAgentId: z.string(),
+  email: z.string().email(),
+  firstName: z.string(),
+  lastName: z.string(),
+  slug: z.string(),
+  role: z.string(),
+  // "MLO" | "BROKER" | "AGENT" — kept as string for forward-compat
+  phone: z.string().nullable(),
+  // Optional profile fields — present when the agent has filled them in
+  photoUrl: z.string().optional(),
+  bio: z.string().optional(),
+  title: z.string().optional(),
+  tagline: z.string().optional(),
+  brokerageName: z.string().optional(),
+  brokerageLogoUrl: z.string().optional(),
+  brokerageLicenseNumber: z.string().optional(),
+  licenseNumber: z.string().optional(),
+  licenseState: z.string().optional(),
+  nmlsNumber: z.string().optional(),
+  websiteUrl: z.string().optional(),
+  applicationUrl: z.string().optional(),
+  social: z.unknown().optional(),
+  // Tenant-owner MLO info — applied to ALL agents in the tenant-enable payload.
+  // For solo MLOs this is the agent's own NMLS; for brokerages it's the owner's.
+  mloName: z.string().optional(),
+  mloNmls: z.string().optional()
+});
+var tenantEnablePayloadSchema = z.object({
+  action: z.literal("enable"),
+  relloTenantId: z.string(),
+  tenant: z.object({
+    name: z.string(),
+    slug: z.string(),
+    logoUrl: z.string().nullable(),
+    primaryColor: z.string().nullable(),
+    physicalAddress: z.string().nullable(),
+    applicationUrl: z.string().nullable(),
+    type: z.string(),
+    // Rello TenantType enum
+    plan: z.string()
+    // Rello Plan enum
+  }),
+  agents: z.array(provisionedAgentSchema)
+});
+var tenantDisablePayloadSchema = z.object({
+  action: z.literal("disable"),
+  relloTenantId: z.string(),
+  reason: z.string().optional()
+});
+var tenantProvisioningPayloadSchema = z.discriminatedUnion("action", [
+  tenantEnablePayloadSchema,
+  tenantDisablePayloadSchema
+]);
+var agentProfileSchema = z.object({
+  specialtySentence: z.string().optional(),
+  experienceStatement: z.string().optional(),
+  typicalClient: z.unknown().optional(),
+  areasServed: z.unknown().optional(),
+  designations: z.unknown().optional(),
+  emailTone: z.string().optional(),
+  soloOrTeam: z.string().optional(),
+  preferredContactMethod: z.string().optional(),
+  calendarLink: z.string().optional(),
+  aboutMeFacts: z.unknown().optional(),
+  avoidTopics: z.unknown().optional(),
+  emphasizeTopics: z.unknown().optional(),
+  sensitiveTopics: z.unknown().optional(),
+  introductionDraft: z.string().optional(),
+  signoffStyle: z.string().optional(),
+  successStorySeeds: z.unknown().optional(),
+  sendFrequency: z.string().optional(),
+  newsletterTemplateId: z.string().optional(),
+  brandColors: z.unknown().optional(),
+  leadSourceContext: z.unknown().optional()
+});
+var wizardAnswerSchema = z.object({
+  questionId: z.string(),
+  question: z.string(),
+  answer: z.unknown()
+});
+var agentProvisionPayloadSchema = z.object({
+  action: z.enum(["add", "update", "remove"]),
+  relloTenantId: z.string(),
+  agent: provisionedAgentSchema,
+  agentProfile: agentProfileSchema.optional(),
+  wizardAnswers: z.array(wizardAnswerSchema).optional()
+});
+function parseTenantPayload(body) {
+  const result = tenantProvisioningPayloadSchema.safeParse(body);
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+  const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return { success: false, error: `Payload validation failed: ${issues}` };
+}
+function parseAgentPayload(body) {
+  const result = agentProvisionPayloadSchema.safeParse(body);
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+  const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+  return { success: false, error: `Payload validation failed: ${issues}` };
+}
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -1428,8 +1535,15 @@ export {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  agentProvisionPayloadSchema,
   createPlatformKeyValidator,
   createRelloClient,
-  createServiceClient
+  createServiceClient,
+  parseAgentPayload,
+  parseTenantPayload,
+  provisionedAgentSchema,
+  tenantDisablePayloadSchema,
+  tenantEnablePayloadSchema,
+  tenantProvisioningPayloadSchema
 };
 //# sourceMappingURL=index.js.map
