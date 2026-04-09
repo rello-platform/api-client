@@ -1303,6 +1303,10 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
         mloName: z.ZodOptional<z.ZodString>;
         mloNmls: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
+    creditAllocation: z.ZodOptional<z.ZodObject<{
+        initialBalance: z.ZodOptional<z.ZodNumber>;
+        poolSize: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 type TenantEnablePayload = z.infer<typeof tenantEnablePayloadSchema>;
 declare const tenantDisablePayloadSchema: z.ZodObject<{
@@ -1347,6 +1351,10 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
         social: z.ZodOptional<z.ZodUnknown>;
         mloName: z.ZodOptional<z.ZodString>;
         mloNmls: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    creditAllocation: z.ZodOptional<z.ZodObject<{
+        initialBalance: z.ZodOptional<z.ZodNumber>;
+        poolSize: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
     }, z.core.$strip>>;
 }, z.core.$strip>, z.ZodObject<{
     action: z.ZodLiteral<"disable">;

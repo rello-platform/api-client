@@ -78,6 +78,13 @@ export const tenantEnablePayloadSchema = z.object({
     plan: z.string(), // Rello Plan enum
   }),
   agents: z.array(provisionedAgentSchema),
+  // HH-specific: initial credit grant for new tenants. Optional — only
+  // sent when the spoke app has a credit system (currently only HH).
+  // Spokes without credits ignore this field.
+  creditAllocation: z.object({
+    initialBalance: z.number().optional(),
+    poolSize: z.number().nullable().optional(),
+  }).optional(),
 });
 
 export type TenantEnablePayload = z.infer<typeof tenantEnablePayloadSchema>;
