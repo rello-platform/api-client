@@ -17,6 +17,8 @@ import { MiloResource } from "./resources/milo.js";
 import { LeadSharesResource } from "./resources/lead-shares.js";
 import { TeamResource } from "./resources/team.js";
 import { ReportsResource } from "./resources/reports.js";
+import { AuthResource } from "./resources/auth.js";
+import { AdminResource } from "./resources/admin.js";
 import type { ServiceClient } from "./service-client.js";
 
 export interface RelloClientConfig {
@@ -65,6 +67,8 @@ export class RelloClient {
   public readonly leadShares: LeadSharesResource;
   public readonly team: TeamResource;
   public readonly reports: ReportsResource;
+  public readonly auth: AuthResource;
+  public readonly admin: AdminResource;
 
   constructor(config: RelloClientConfig = {}) {
     const baseUrl = config.baseUrl
@@ -72,8 +76,8 @@ export class RelloClient {
       ?? "";
 
     const apiKey = config.apiKey
-      ?? process.env.RELLO_API_KEY
       ?? process.env.RELLO_APP_SECRET
+      ?? process.env.RELLO_API_KEY
       ?? "";
 
     const appSlug = config.appSlug
@@ -135,6 +139,8 @@ export class RelloClient {
     this.leadShares = new LeadSharesResource(transport);
     this.team = new TeamResource(transport);
     this.reports = new ReportsResource(transport);
+    this.auth = new AuthResource(transport);
+    this.admin = new AdminResource(transport);
   }
 
   /**

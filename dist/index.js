@@ -186,7 +186,7 @@ var Transport = class {
   async request(method, path, options) {
     const requestId = randomUUID();
     const timeoutMs = this.timeouts[options.timeout ?? "default"];
-    let url = `${this.baseUrl}/api/v1${path}`;
+    let url = `${this.baseUrl}${options.apiPrefix ?? "/api/v1"}${path}`;
     if (options.query) {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(options.query)) {
@@ -285,6 +285,18 @@ var Transport = class {
   }
   async delete(path, tenantId, timeout) {
     return this.request("DELETE", path, { tenantId, timeout: timeout ?? "write" });
+  }
+  /**
+   * GET a non-v1 route (uses `/api` prefix instead of `/api/v1`).
+   */
+  async getRaw(path, tenantId, query, timeout) {
+    return this.request("GET", path, { tenantId, query, timeout, apiPrefix: "/api" });
+  }
+  /**
+   * POST to a non-v1 route (uses `/api` prefix instead of `/api/v1`).
+   */
+  async postRaw(path, tenantId, body, timeout) {
+    return this.request("POST", path, { tenantId, body, timeout, apiPrefix: "/api" });
   }
 };
 
@@ -513,6 +525,32 @@ var LeadsResource = class {
       timeout: "read"
     });
     return res.data;
+  }
+  /**
+   * Get the pre-computed context cache narrative for a lead.
+   *
+   * GET /api/leads/[id]/context-cache (non-v1 route)
+   *
+   * Returns the Haiku-polished narrative, emotional state, data source counts,
+   * and freshness info. Used by the LeadStoryCard on the lead detail Overview tab.
+   */
+  async getContextCache(tenantId, leadId) {
+    return this.transport.getRaw(`/leads/${leadId}/context-cache`, tenantId);
+  }
+  /**
+   * Record an offline interaction for a lead.
+   *
+   * POST /api/v1/leads/:id/offline-interactions
+   *
+   * Used by spoke apps to record phone calls, meetings, showings, open house
+   * interactions, and notes that occurred outside the platform.
+   */
+  async recordOfflineInteraction(tenantId, leadId, data) {
+    return this.transport.post(
+      `/leads/${leadId}/offline-interactions`,
+      tenantId,
+      data
+    );
   }
 };
 
@@ -1269,11 +1307,59 @@ var ReportsResource = class {
   }
 };
 
+// src/resources/auth.ts
+var AuthResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * Validate a rello_session token for spoke apps.
+   *
+   * POST /api/auth/validate (non-v1 route)
+   *
+   * Spoke apps (The Oven, Home Scout, etc.) forward the session cookie and
+   * receive the user/tenant context. Returns the user profile including
+   * tenantId, role, and tenant metadata.
+   *
+   * @throws RelloAuthError if the token is invalid or expired.
+   */
+  async validate(tenantId, input) {
+    return this.transport.postRaw(
+      "/auth/validate",
+      tenantId,
+      input
+    );
+  }
+};
+
+// src/resources/admin.ts
+var AdminResource = class {
+  constructor(transport) {
+    this.transport = transport;
+  }
+  /**
+   * Log AI usage for cost tracking and cap enforcement.
+   *
+   * POST /api/admin/ai/usage-log (non-v1 route)
+   *
+   * Called by spoke apps (Home Stretch, Milo Engine, etc.) to record AI
+   * inference calls. Rello aggregates costs and enforces daily/monthly caps.
+   * Returns current cost totals and whether the cap has been exceeded.
+   */
+  async logAiUsage(tenantId, data) {
+    return this.transport.postRaw(
+      "/admin/ai/usage-log",
+      tenantId,
+      data
+    );
+  }
+};
+
 // src/client.ts
 var RelloClient = class {
   constructor(config = {}) {
     const baseUrl = config.baseUrl ?? process.env.RELLO_API_URL ?? "";
-    const apiKey = config.apiKey ?? process.env.RELLO_API_KEY ?? process.env.RELLO_APP_SECRET ?? "";
+    const apiKey = config.apiKey ?? process.env.RELLO_APP_SECRET ?? process.env.RELLO_API_KEY ?? "";
     const appSlug = config.appSlug ?? process.env.APP_SLUG ?? process.env.RELLO_APP_SLUG ?? "";
     if (!baseUrl) {
       throw new Error(
@@ -1316,6 +1402,8 @@ var RelloClient = class {
     this.leadShares = new LeadSharesResource(transport);
     this.team = new TeamResource(transport);
     this.reports = new ReportsResource(transport);
+    this.auth = new AuthResource(transport);
+    this.admin = new AdminResource(transport);
   }
   /**
    * Resolve a ServiceClient for another platform app by slug.
@@ -1541,6 +1629,8 @@ function createServiceClient(config) {
   return new ServiceClient(config);
 }
 export {
+  AdminResource,
+  AuthResource,
   RelloAuthError,
   RelloClient,
   RelloError,

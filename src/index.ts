@@ -45,6 +45,10 @@ export {
   type PlatformCaller,
 } from "./platform-key-validator.js";
 
+// Resource classes (for advanced consumers who need direct access)
+export { AuthResource } from "./resources/auth.js";
+export { AdminResource } from "./resources/admin.js";
+
 // Errors
 export {
   RelloError,
@@ -105,12 +109,22 @@ export type {
   LeadSharesListParams,
   TeamAgent,
   TeamStats,
+  ContextCacheResponse,
+  RecordOfflineInteractionInput,
+  OfflineInteractionResponse,
   ReportIngestInput,
   ProvisionedAgent,
   TenantEnablePayload,
   TenantDisablePayload,
   TenantProvisioningPayload,
   AgentProvisionPayload,
+  ValidateSessionInput,
+  ValidateSessionResponse,
+  ValidateSessionError,
+  ValidatedUser,
+  ValidatedTenant,
+  LogAiUsageInput,
+  LogAiUsageResponse,
 } from "./types/index.js";
 
 // Provisioning schemas + runtime validators

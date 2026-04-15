@@ -11,6 +11,9 @@ import type {
   FindByTagsInput,
   FindByTagsResult,
   BatchTagsResult,
+  ContextCacheResponse,
+  RecordOfflineInteractionInput,
+  OfflineInteractionResponse,
 } from "../types/lead.js";
 
 export class LeadsResource {
@@ -316,5 +319,37 @@ export class LeadsResource {
       timeout: "read",
     });
     return res.data;
+  }
+
+  /**
+   * Get the pre-computed context cache narrative for a lead.
+   *
+   * GET /api/leads/[id]/context-cache (non-v1 route)
+   *
+   * Returns the Haiku-polished narrative, emotional state, data source counts,
+   * and freshness info. Used by the LeadStoryCard on the lead detail Overview tab.
+   */
+  async getContextCache(tenantId: string, leadId: string): Promise<ContextCacheResponse> {
+    return this.transport.getRaw<ContextCacheResponse>(`/leads/${leadId}/context-cache`, tenantId);
+  }
+
+  /**
+   * Record an offline interaction for a lead.
+   *
+   * POST /api/v1/leads/:id/offline-interactions
+   *
+   * Used by spoke apps to record phone calls, meetings, showings, open house
+   * interactions, and notes that occurred outside the platform.
+   */
+  async recordOfflineInteraction(
+    tenantId: string,
+    leadId: string,
+    data: RecordOfflineInteractionInput
+  ): Promise<OfflineInteractionResponse> {
+    return this.transport.post<OfflineInteractionResponse>(
+      `/leads/${leadId}/offline-interactions`,
+      tenantId,
+      data
+    );
   }
 }

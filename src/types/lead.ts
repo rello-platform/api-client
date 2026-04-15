@@ -143,3 +143,55 @@ export interface ConversionScore {
   factors: Record<string, unknown>;
   updatedAt: string;
 }
+
+/** Response from GET /api/leads/[id]/context-cache */
+export interface ContextCacheResponse {
+  exists: boolean;
+  leadId: string;
+  narrative?: string;
+  emotionalState?: string;
+  sourcesPresent?: number;
+  sourcesTotal?: number;
+  computedAt?: string;
+  isStale?: boolean;
+  freshnessLabel?: string;
+  refreshReason?: string | null;
+}
+
+/** Input for POST /api/v1/leads/:id/offline-interactions */
+export interface RecordOfflineInteractionInput {
+  /** Interaction type. One of: "call", "meeting", "showing", "open_house", "note". */
+  type: "call" | "phone_call" | "meeting" | "showing" | "open_house" | "note";
+  /** Interaction outcome (required). */
+  outcome: string;
+  /** Free-text notes (optional). */
+  notes?: string;
+  /** Duration in minutes (optional). */
+  duration?: number;
+  /** Sentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "MIXED". Defaults to NEUTRAL. */
+  sentiment?: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "MIXED";
+  /** ISO timestamp of when the interaction occurred. Defaults to now. */
+  occurredAt?: string;
+  /** Source app slug (optional). */
+  source?: string;
+  /** Agent ID override (optional — defaults to lead's assigned agent). */
+  agentId?: string;
+}
+
+/** Response from POST /api/v1/leads/:id/offline-interactions */
+export interface OfflineInteractionResponse {
+  interaction: {
+    id: string;
+    tenantId: string;
+    leadId: string;
+    agentId: string;
+    type: string;
+    sentiment: string;
+    duration: number | null;
+    notes: string | null;
+    outcome: string;
+    occurredAt: string;
+    createdAt: string;
+    [key: string]: unknown;
+  };
+}

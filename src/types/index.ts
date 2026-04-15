@@ -10,6 +10,9 @@ export type {
   FindByTagsInput,
   FindByTagsResult,
   BatchTagsResult,
+  ContextCacheResponse,
+  RecordOfflineInteractionInput,
+  OfflineInteractionResponse,
 } from "./lead.js";
 
 export type {
@@ -101,6 +104,19 @@ export type {
   TenantProvisioningPayload,
   AgentProvisionPayload,
 } from "./provisioning.js";
+
+export type {
+  ValidateSessionInput,
+  ValidateSessionResponse,
+  ValidateSessionError,
+  ValidatedUser,
+  ValidatedTenant,
+} from "./auth.js";
+
+export type {
+  LogAiUsageInput,
+  LogAiUsageResponse,
+} from "./admin.js";
 
 export {
   provisionedAgentSchema,

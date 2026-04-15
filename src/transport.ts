@@ -80,13 +80,15 @@ export class Transport {
       query?: Record<string, string | undefined>;
       timeout?: TimeoutPreset;
       headers?: Record<string, string>;
+      /** Override the default `/api/v1` prefix (e.g., `/api` for non-v1 routes). */
+      apiPrefix?: string;
     }
   ): Promise<T> {
     const requestId = randomUUID();
     const timeoutMs = this.timeouts[options.timeout ?? "default"];
 
     // Build URL with query parameters
-    let url = `${this.baseUrl}/api/v1${path}`;
+    let url = `${this.baseUrl}${options.apiPrefix ?? '/api/v1'}${path}`;
     if (options.query) {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(options.query)) {
@@ -226,5 +228,29 @@ export class Transport {
     timeout?: TimeoutPreset
   ): Promise<T> {
     return this.request<T>("DELETE", path, { tenantId, timeout: timeout ?? "write" });
+  }
+
+  /**
+   * GET a non-v1 route (uses `/api` prefix instead of `/api/v1`).
+   */
+  async getRaw<T>(
+    path: string,
+    tenantId: string,
+    query?: Record<string, string | undefined>,
+    timeout?: TimeoutPreset
+  ): Promise<T> {
+    return this.request<T>("GET", path, { tenantId, query, timeout, apiPrefix: "/api" });
+  }
+
+  /**
+   * POST to a non-v1 route (uses `/api` prefix instead of `/api/v1`).
+   */
+  async postRaw<T>(
+    path: string,
+    tenantId: string,
+    body?: unknown,
+    timeout?: TimeoutPreset
+  ): Promise<T> {
+    return this.request<T>("POST", path, { tenantId, body, timeout, apiPrefix: "/api" });
   }
 }

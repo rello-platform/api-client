@@ -37,12 +37,22 @@ declare class Transport {
         query?: Record<string, string | undefined>;
         timeout?: TimeoutPreset;
         headers?: Record<string, string>;
+        /** Override the default `/api/v1` prefix (e.g., `/api` for non-v1 routes). */
+        apiPrefix?: string;
     }): Promise<T>;
     private doFetch;
     get<T>(path: string, tenantId: string, query?: Record<string, string | undefined>, timeout?: TimeoutPreset): Promise<T>;
     post<T>(path: string, tenantId: string, body: unknown, timeout?: TimeoutPreset): Promise<T>;
     patch<T>(path: string, tenantId: string, body: unknown, timeout?: TimeoutPreset): Promise<T>;
     delete<T>(path: string, tenantId: string, timeout?: TimeoutPreset): Promise<T>;
+    /**
+     * GET a non-v1 route (uses `/api` prefix instead of `/api/v1`).
+     */
+    getRaw<T>(path: string, tenantId: string, query?: Record<string, string | undefined>, timeout?: TimeoutPreset): Promise<T>;
+    /**
+     * POST to a non-v1 route (uses `/api` prefix instead of `/api/v1`).
+     */
+    postRaw<T>(path: string, tenantId: string, body?: unknown, timeout?: TimeoutPreset): Promise<T>;
 }
 
 interface Lead {
@@ -186,6 +196,55 @@ interface ConversionScore {
     factors: Record<string, unknown>;
     updatedAt: string;
 }
+/** Response from GET /api/leads/[id]/context-cache */
+interface ContextCacheResponse {
+    exists: boolean;
+    leadId: string;
+    narrative?: string;
+    emotionalState?: string;
+    sourcesPresent?: number;
+    sourcesTotal?: number;
+    computedAt?: string;
+    isStale?: boolean;
+    freshnessLabel?: string;
+    refreshReason?: string | null;
+}
+/** Input for POST /api/v1/leads/:id/offline-interactions */
+interface RecordOfflineInteractionInput {
+    /** Interaction type. One of: "call", "meeting", "showing", "open_house", "note". */
+    type: "call" | "phone_call" | "meeting" | "showing" | "open_house" | "note";
+    /** Interaction outcome (required). */
+    outcome: string;
+    /** Free-text notes (optional). */
+    notes?: string;
+    /** Duration in minutes (optional). */
+    duration?: number;
+    /** Sentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "MIXED". Defaults to NEUTRAL. */
+    sentiment?: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "MIXED";
+    /** ISO timestamp of when the interaction occurred. Defaults to now. */
+    occurredAt?: string;
+    /** Source app slug (optional). */
+    source?: string;
+    /** Agent ID override (optional — defaults to lead's assigned agent). */
+    agentId?: string;
+}
+/** Response from POST /api/v1/leads/:id/offline-interactions */
+interface OfflineInteractionResponse {
+    interaction: {
+        id: string;
+        tenantId: string;
+        leadId: string;
+        agentId: string;
+        type: string;
+        sentiment: string;
+        duration: number | null;
+        notes: string | null;
+        outcome: string;
+        occurredAt: string;
+        createdAt: string;
+        [key: string]: unknown;
+    };
+}
 
 declare class LeadsResource {
     private readonly transport;
@@ -293,6 +352,24 @@ declare class LeadsResource {
      * Uses PUT (not GET) because the leadIds array can exceed URL length limits.
      */
     getBatchTags(tenantId: string, leadIds: string[]): Promise<BatchTagsResult>;
+    /**
+     * Get the pre-computed context cache narrative for a lead.
+     *
+     * GET /api/leads/[id]/context-cache (non-v1 route)
+     *
+     * Returns the Haiku-polished narrative, emotional state, data source counts,
+     * and freshness info. Used by the LeadStoryCard on the lead detail Overview tab.
+     */
+    getContextCache(tenantId: string, leadId: string): Promise<ContextCacheResponse>;
+    /**
+     * Record an offline interaction for a lead.
+     *
+     * POST /api/v1/leads/:id/offline-interactions
+     *
+     * Used by spoke apps to record phone calls, meetings, showings, open house
+     * interactions, and notes that occurred outside the platform.
+     */
+    recordOfflineInteraction(tenantId: string, leadId: string, data: RecordOfflineInteractionInput): Promise<OfflineInteractionResponse>;
 }
 
 /**
@@ -1042,6 +1119,106 @@ declare class ReportsResource {
     ingest(tenantId: string, data: ReportIngestInput): Promise<void>;
 }
 
+/** Input for POST /api/auth/validate */
+interface ValidateSessionInput {
+    /** The rello_session token to validate. */
+    token: string;
+}
+/** Tenant info returned from session validation. */
+interface ValidatedTenant {
+    id: string;
+    name: string;
+    type: string;
+    slug: string | null;
+}
+/** User data returned from session validation. */
+interface ValidatedUser {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    role: string;
+    tenantId: string;
+    tenant: ValidatedTenant | null;
+}
+/** Successful response from POST /api/auth/validate */
+interface ValidateSessionResponse {
+    success: true;
+    data: ValidatedUser;
+}
+/** Error response from POST /api/auth/validate */
+interface ValidateSessionError {
+    success: false;
+    error: string;
+}
+
+declare class AuthResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * Validate a rello_session token for spoke apps.
+     *
+     * POST /api/auth/validate (non-v1 route)
+     *
+     * Spoke apps (The Oven, Home Scout, etc.) forward the session cookie and
+     * receive the user/tenant context. Returns the user profile including
+     * tenantId, role, and tenant metadata.
+     *
+     * @throws RelloAuthError if the token is invalid or expired.
+     */
+    validate(tenantId: string, input: ValidateSessionInput): Promise<ValidateSessionResponse>;
+}
+
+/** Input for POST /api/admin/ai/usage-log */
+interface LogAiUsageInput {
+    /** Calling app identifier (e.g., "home-stretch", "milo-engine"). */
+    callerApp: string;
+    /** API endpoint that was called. */
+    endpoint: string;
+    /** Prompt slug used (if applicable). */
+    promptSlug?: string | null;
+    /** AI model used (e.g., "claude-sonnet-4-20250514"). */
+    model?: string | null;
+    /** Total tokens used. */
+    tokensUsed?: number | null;
+    /** Input/prompt tokens. */
+    inputTokens?: number | null;
+    /** Output/completion tokens. */
+    outputTokens?: number | null;
+    /** Estimated cost in USD. */
+    estimatedCost?: number | null;
+    /** Latency in milliseconds. */
+    latencyMs?: number | null;
+    /** Associated lead ID (if applicable). */
+    leadId?: string | null;
+    /** Whether the AI call succeeded. Defaults to true. */
+    success?: boolean;
+    /** Error type if the call failed. */
+    errorType?: string | null;
+}
+/** Response from POST /api/admin/ai/usage-log */
+interface LogAiUsageResponse {
+    logged: boolean;
+    costCapExceeded: boolean;
+    dailyCost: number;
+    monthlyCost: number;
+}
+
+declare class AdminResource {
+    private readonly transport;
+    constructor(transport: Transport);
+    /**
+     * Log AI usage for cost tracking and cap enforcement.
+     *
+     * POST /api/admin/ai/usage-log (non-v1 route)
+     *
+     * Called by spoke apps (Home Stretch, Milo Engine, etc.) to record AI
+     * inference calls. Rello aggregates costs and enforces daily/monthly caps.
+     * Returns current cost totals and whether the cap has been exceeded.
+     */
+    logAiUsage(tenantId: string, data: LogAiUsageInput): Promise<LogAiUsageResponse>;
+}
+
 interface RelloClientConfig {
     /** Rello API base URL. Default: RELLO_API_URL env var. Must NOT include "/api". */
     baseUrl?: string;
@@ -1087,6 +1264,8 @@ declare class RelloClient {
     readonly leadShares: LeadSharesResource;
     readonly team: TeamResource;
     readonly reports: ReportsResource;
+    readonly auth: AuthResource;
+    readonly admin: AdminResource;
     constructor(config?: RelloClientConfig);
     /**
      * Resolve a ServiceClient for another platform app by slug.
@@ -1585,4 +1764,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type Agent, type AgentProvisionPayload, type AppInfo, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, agentProvisionPayloadSchema, createPlatformKeyValidator, createRelloClient, createServiceClient, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, createPlatformKeyValidator, createRelloClient, createServiceClient, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
