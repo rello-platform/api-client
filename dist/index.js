@@ -1439,7 +1439,12 @@ var provisionedAgentSchema = z.object({
   // Tenant-owner MLO info — applied to ALL agents in the tenant-enable payload.
   // For solo MLOs this is the agent's own NMLS; for brokerages it's the owner's.
   mloName: z.string().optional(),
-  mloNmls: z.string().optional()
+  mloNmls: z.string().optional(),
+  // PTA-013 F-06: Milo profile + wizard answers per agent in tenant-enable payloads.
+  // Present when agent has completed the Rello Start Wizard. Only sent in
+  // tenant-enable (bulk) — per-agent provision carries these at the top level.
+  agentProfile: z.lazy(() => agentProfileSchema).optional(),
+  wizardAnswers: z.array(z.lazy(() => wizardAnswerSchema)).optional()
 });
 var tenantEnablePayloadSchema = z.object({
   action: z.literal("enable"),
@@ -1506,7 +1511,10 @@ var agentProvisionPayloadSchema = z.object({
   relloTenantId: z.string(),
   agent: provisionedAgentSchema,
   agentProfile: agentProfileSchema.optional(),
-  wizardAnswers: z.array(wizardAnswerSchema).optional()
+  wizardAnswers: z.array(wizardAnswerSchema).optional(),
+  // PTA-013 F-05: Tenant physical address sent alongside per-agent sync.
+  // CAN-SPAM compliance — spokes persist this on their local Tenant model.
+  physicalAddress: z.unknown().nullable().optional()
 });
 function parseTenantPayload(body) {
   const result = tenantProvisioningPayloadSchema.safeParse(body);

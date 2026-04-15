@@ -1264,6 +1264,33 @@ declare const provisionedAgentSchema: z.ZodObject<{
     social: z.ZodOptional<z.ZodUnknown>;
     mloName: z.ZodOptional<z.ZodString>;
     mloNmls: z.ZodOptional<z.ZodString>;
+    agentProfile: z.ZodOptional<z.ZodLazy<z.ZodObject<{
+        specialtySentence: z.ZodOptional<z.ZodString>;
+        experienceStatement: z.ZodOptional<z.ZodString>;
+        typicalClient: z.ZodOptional<z.ZodUnknown>;
+        areasServed: z.ZodOptional<z.ZodUnknown>;
+        designations: z.ZodOptional<z.ZodUnknown>;
+        emailTone: z.ZodOptional<z.ZodString>;
+        soloOrTeam: z.ZodOptional<z.ZodString>;
+        preferredContactMethod: z.ZodOptional<z.ZodString>;
+        calendarLink: z.ZodOptional<z.ZodString>;
+        aboutMeFacts: z.ZodOptional<z.ZodUnknown>;
+        avoidTopics: z.ZodOptional<z.ZodUnknown>;
+        emphasizeTopics: z.ZodOptional<z.ZodUnknown>;
+        sensitiveTopics: z.ZodOptional<z.ZodUnknown>;
+        introductionDraft: z.ZodOptional<z.ZodString>;
+        signoffStyle: z.ZodOptional<z.ZodString>;
+        successStorySeeds: z.ZodOptional<z.ZodUnknown>;
+        sendFrequency: z.ZodOptional<z.ZodString>;
+        newsletterTemplateId: z.ZodOptional<z.ZodString>;
+        brandColors: z.ZodOptional<z.ZodUnknown>;
+        leadSourceContext: z.ZodOptional<z.ZodUnknown>;
+    }, z.core.$strip>>>;
+    wizardAnswers: z.ZodOptional<z.ZodArray<z.ZodLazy<z.ZodObject<{
+        questionId: z.ZodString;
+        question: z.ZodString;
+        answer: z.ZodUnknown;
+    }, z.core.$strip>>>>;
 }, z.core.$strip>;
 type ProvisionedAgent = z.infer<typeof provisionedAgentSchema>;
 declare const tenantEnablePayloadSchema: z.ZodObject<{
@@ -1302,6 +1329,33 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
         social: z.ZodOptional<z.ZodUnknown>;
         mloName: z.ZodOptional<z.ZodString>;
         mloNmls: z.ZodOptional<z.ZodString>;
+        agentProfile: z.ZodOptional<z.ZodLazy<z.ZodObject<{
+            specialtySentence: z.ZodOptional<z.ZodString>;
+            experienceStatement: z.ZodOptional<z.ZodString>;
+            typicalClient: z.ZodOptional<z.ZodUnknown>;
+            areasServed: z.ZodOptional<z.ZodUnknown>;
+            designations: z.ZodOptional<z.ZodUnknown>;
+            emailTone: z.ZodOptional<z.ZodString>;
+            soloOrTeam: z.ZodOptional<z.ZodString>;
+            preferredContactMethod: z.ZodOptional<z.ZodString>;
+            calendarLink: z.ZodOptional<z.ZodString>;
+            aboutMeFacts: z.ZodOptional<z.ZodUnknown>;
+            avoidTopics: z.ZodOptional<z.ZodUnknown>;
+            emphasizeTopics: z.ZodOptional<z.ZodUnknown>;
+            sensitiveTopics: z.ZodOptional<z.ZodUnknown>;
+            introductionDraft: z.ZodOptional<z.ZodString>;
+            signoffStyle: z.ZodOptional<z.ZodString>;
+            successStorySeeds: z.ZodOptional<z.ZodUnknown>;
+            sendFrequency: z.ZodOptional<z.ZodString>;
+            newsletterTemplateId: z.ZodOptional<z.ZodString>;
+            brandColors: z.ZodOptional<z.ZodUnknown>;
+            leadSourceContext: z.ZodOptional<z.ZodUnknown>;
+        }, z.core.$strip>>>;
+        wizardAnswers: z.ZodOptional<z.ZodArray<z.ZodLazy<z.ZodObject<{
+            questionId: z.ZodString;
+            question: z.ZodString;
+            answer: z.ZodUnknown;
+        }, z.core.$strip>>>>;
     }, z.core.$strip>>;
     creditAllocation: z.ZodOptional<z.ZodObject<{
         initialBalance: z.ZodOptional<z.ZodNumber>;
@@ -1351,6 +1405,33 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
         social: z.ZodOptional<z.ZodUnknown>;
         mloName: z.ZodOptional<z.ZodString>;
         mloNmls: z.ZodOptional<z.ZodString>;
+        agentProfile: z.ZodOptional<z.ZodLazy<z.ZodObject<{
+            specialtySentence: z.ZodOptional<z.ZodString>;
+            experienceStatement: z.ZodOptional<z.ZodString>;
+            typicalClient: z.ZodOptional<z.ZodUnknown>;
+            areasServed: z.ZodOptional<z.ZodUnknown>;
+            designations: z.ZodOptional<z.ZodUnknown>;
+            emailTone: z.ZodOptional<z.ZodString>;
+            soloOrTeam: z.ZodOptional<z.ZodString>;
+            preferredContactMethod: z.ZodOptional<z.ZodString>;
+            calendarLink: z.ZodOptional<z.ZodString>;
+            aboutMeFacts: z.ZodOptional<z.ZodUnknown>;
+            avoidTopics: z.ZodOptional<z.ZodUnknown>;
+            emphasizeTopics: z.ZodOptional<z.ZodUnknown>;
+            sensitiveTopics: z.ZodOptional<z.ZodUnknown>;
+            introductionDraft: z.ZodOptional<z.ZodString>;
+            signoffStyle: z.ZodOptional<z.ZodString>;
+            successStorySeeds: z.ZodOptional<z.ZodUnknown>;
+            sendFrequency: z.ZodOptional<z.ZodString>;
+            newsletterTemplateId: z.ZodOptional<z.ZodString>;
+            brandColors: z.ZodOptional<z.ZodUnknown>;
+            leadSourceContext: z.ZodOptional<z.ZodUnknown>;
+        }, z.core.$strip>>>;
+        wizardAnswers: z.ZodOptional<z.ZodArray<z.ZodLazy<z.ZodObject<{
+            questionId: z.ZodString;
+            question: z.ZodString;
+            answer: z.ZodUnknown;
+        }, z.core.$strip>>>>;
     }, z.core.$strip>>;
     creditAllocation: z.ZodOptional<z.ZodObject<{
         initialBalance: z.ZodOptional<z.ZodNumber>;
@@ -1392,6 +1473,33 @@ declare const agentProvisionPayloadSchema: z.ZodObject<{
         social: z.ZodOptional<z.ZodUnknown>;
         mloName: z.ZodOptional<z.ZodString>;
         mloNmls: z.ZodOptional<z.ZodString>;
+        agentProfile: z.ZodOptional<z.ZodLazy<z.ZodObject<{
+            specialtySentence: z.ZodOptional<z.ZodString>;
+            experienceStatement: z.ZodOptional<z.ZodString>;
+            typicalClient: z.ZodOptional<z.ZodUnknown>;
+            areasServed: z.ZodOptional<z.ZodUnknown>;
+            designations: z.ZodOptional<z.ZodUnknown>;
+            emailTone: z.ZodOptional<z.ZodString>;
+            soloOrTeam: z.ZodOptional<z.ZodString>;
+            preferredContactMethod: z.ZodOptional<z.ZodString>;
+            calendarLink: z.ZodOptional<z.ZodString>;
+            aboutMeFacts: z.ZodOptional<z.ZodUnknown>;
+            avoidTopics: z.ZodOptional<z.ZodUnknown>;
+            emphasizeTopics: z.ZodOptional<z.ZodUnknown>;
+            sensitiveTopics: z.ZodOptional<z.ZodUnknown>;
+            introductionDraft: z.ZodOptional<z.ZodString>;
+            signoffStyle: z.ZodOptional<z.ZodString>;
+            successStorySeeds: z.ZodOptional<z.ZodUnknown>;
+            sendFrequency: z.ZodOptional<z.ZodString>;
+            newsletterTemplateId: z.ZodOptional<z.ZodString>;
+            brandColors: z.ZodOptional<z.ZodUnknown>;
+            leadSourceContext: z.ZodOptional<z.ZodUnknown>;
+        }, z.core.$strip>>>;
+        wizardAnswers: z.ZodOptional<z.ZodArray<z.ZodLazy<z.ZodObject<{
+            questionId: z.ZodString;
+            question: z.ZodString;
+            answer: z.ZodUnknown;
+        }, z.core.$strip>>>>;
     }, z.core.$strip>;
     agentProfile: z.ZodOptional<z.ZodObject<{
         specialtySentence: z.ZodOptional<z.ZodString>;
@@ -1420,6 +1528,7 @@ declare const agentProvisionPayloadSchema: z.ZodObject<{
         question: z.ZodString;
         answer: z.ZodUnknown;
     }, z.core.$strip>>>;
+    physicalAddress: z.ZodOptional<z.ZodNullable<z.ZodUnknown>>;
 }, z.core.$strip>;
 type AgentProvisionPayload = z.infer<typeof agentProvisionPayloadSchema>;
 /**
