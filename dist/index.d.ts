@@ -1,3 +1,4 @@
+import { AppSlug } from '@rello-platform/slugs';
 import { z } from 'zod';
 
 interface TransportConfig {
@@ -86,8 +87,8 @@ interface CreateLeadInput {
     lastName?: string;
     email?: string;
     phone?: string;
-    /** Lead source (e.g., "newsletter_studio", "the-home-scout"). */
-    source?: string;
+    /** Canonical Format-2 AppSlug identifying the originating app (e.g., "home-ready", "harvest-home"). Rello rejects legacy Format-3 UPPERCASE-concat and Format-4 UPPERCASE_UNDERSCORE values at the zod boundary. */
+    source?: AppSlug;
     /** Property type interest (e.g., "single_family", "condo"). */
     propertyType?: string;
     /** Price range interest. */
@@ -120,8 +121,8 @@ interface CreateLeadInput {
     assignedAgentId?: string;
     /** MLO assignment — Rello User ID. */
     assignedMloId?: string;
-    /** Which apps contributed data to this lead (e.g., ["HOMEREADY"]). */
-    appsUsed?: string[];
+    /** Which apps contributed data to this lead, as canonical Format-2 AppSlugs (e.g., ["home-ready"]). */
+    appsUsed?: AppSlug[];
 }
 interface UpdateLeadInput {
     email?: string;
