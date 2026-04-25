@@ -138,18 +138,3 @@ export {
   parseAgentPayload,
 } from "./types/index.js";
 
-// Canonical permissions registry — single source of truth for every
-// permission slug receivers gate on and `ApiKey` rows hold. Resolves the
-// cross-repo split-brain documented in
-// DISCOVERED-PERMISSIONS-REGISTRY-CROSS-REPO-DRIFT-042526.
-export {
-  PERMISSIONS,
-  ALL_PERMISSION_SLUGS,
-  PERMISSION_SLUG_SET,
-  WILDCARD_PERMISSION,
-  VALID_PERMISSION_VALUES,
-  isPermissionSlug,
-  type Permission,
-  type PermissionKey,
-  type PermissionDefinition,
-} from "./permissions.js";
