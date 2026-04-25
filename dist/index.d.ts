@@ -2002,6 +2002,12 @@ declare const PERMISSIONS: {
         readonly description: "Spoke → Rello signal ingest via /api/signals/batch and /api/signals/ingest. Held by every spoke's outbound key.";
         readonly validatedBy: readonly ["rello"];
     };
+    readonly INTAKE_WRITE: {
+        readonly slug: "intake:write";
+        readonly label: "Write intake";
+        readonly description: "Rello → Harvest Home /api/intake[/re-enrich[-batch]] per-caller credential. Replaces the shared INTAKE_APP_SECRET env var per NA-080 (Plan-A2). HH's requireIntakeBearer enforces this permission via createPlatformKeyValidator.";
+        readonly validatedBy: readonly ["harvest-home"];
+    };
     readonly TAGS_READ: {
         readonly slug: "tags:read";
         readonly label: "Read tags";

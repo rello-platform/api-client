@@ -1,6 +1,6 @@
 {
   "name": "@rello-platform/api-client",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "description": "Unified API client for Rello platform spoke apps",
   "type": "module",
   "main": "./dist/index.js",

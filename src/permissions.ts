@@ -300,6 +300,14 @@ export const PERMISSIONS = {
     validatedBy: ["rello"],
   },
 
+  // ─── Intake (Rello → HH per-caller credential, NA-080) ────────────────────
+  INTAKE_WRITE: {
+    slug: "intake:write",
+    label: "Write intake",
+    description: "Rello → Harvest Home /api/intake[/re-enrich[-batch]] per-caller credential. Replaces the shared INTAKE_APP_SECRET env var per NA-080 (Plan-A2). HH's requireIntakeBearer enforces this permission via createPlatformKeyValidator.",
+    validatedBy: ["harvest-home"],
+  },
+
   // ─── Tags ─────────────────────────────────────────────────────────────────
   TAGS_READ: {
     slug: "tags:read",
