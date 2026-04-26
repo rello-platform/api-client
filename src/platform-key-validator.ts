@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import type { PermissionSlug } from "@rello-platform/permissions";
 
 /**
  * Configuration for the platform key validator.
@@ -25,7 +26,7 @@ interface CachedKey {
   id: string;
   appSource: string;
   keyHash: string;
-  permissions: string[];
+  permissions: readonly PermissionSlug[];
 }
 
 /**
@@ -36,8 +37,8 @@ export interface PlatformCaller {
   appSource: string;
   /** The ApiKey record ID. */
   keyId: string;
-  /** Permissions array from the ApiKey record. */
-  permissions: string[];
+  /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
+  permissions: readonly PermissionSlug[];
 }
 
 /**
@@ -118,7 +119,7 @@ export function createPlatformKeyValidator(
           appSource: String(entry.appSource ?? ""),
           keyHash: String(entry.keyHash ?? ""),
           permissions: Array.isArray(entry.permissions)
-            ? entry.permissions.map(String)
+            ? (entry.permissions.map(String) as PermissionSlug[])
             : [],
         };
       });

@@ -1,4 +1,5 @@
 import { AppSlug } from '@rello-platform/slugs';
+import { PermissionSlug } from '@rello-platform/permissions';
 import { z } from 'zod';
 
 interface TransportConfig {
@@ -1329,8 +1330,8 @@ interface PlatformCaller {
     appSource: string;
     /** The ApiKey record ID. */
     keyId: string;
-    /** Permissions array from the ApiKey record. */
-    permissions: string[];
+    /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
+    permissions: readonly PermissionSlug[];
 }
 /**
  * Create a validator for inbound platform service-to-service calls.
