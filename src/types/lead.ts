@@ -1,5 +1,20 @@
 import type { AppSlug } from "@rello-platform/slugs";
 
+/**
+ * Entity-shape classification for a Lead. Mirrors the EntityType union
+ * exported from `@rello-platform/lead-entity` (the canonical source of truth
+ * for the classifier + normalizer pure-functions). Duplicated here as a
+ * literal to avoid a circular package dependency at this layer; a follow-up
+ * bump may fold this into a named import once consumer pin orderings settle.
+ */
+export type EntityType =
+  | "INDIVIDUAL"
+  | "LLC"
+  | "PARTNERSHIP"
+  | "TRUST"
+  | "CORPORATION"
+  | "OTHER";
+
 export interface Lead {
   id: string;
   email: string | null;
@@ -68,6 +83,20 @@ export interface CreateLeadInput {
   assignedMloId?: string;
   /** Which apps contributed data to this lead, as canonical Format-2 AppSlugs (e.g., ["home-ready"]). */
   appsUsed?: AppSlug[];
+  /**
+   * Entity-shape classification. Defaults to INDIVIDUAL on the Rello server
+   * when omitted. When non-INDIVIDUAL, `entityName` must accompany this
+   * value; for INDIVIDUAL, `entityName` must be omitted. The classifier +
+   * normalizer pure-functions live in `@rello-platform/lead-entity`.
+   */
+  entityType?: EntityType;
+  /**
+   * Raw entity name as captured from the upstream source (BYOL CSV row,
+   * intake API payload, manual entry). Preserves casing + punctuation for
+   * display. Required when `entityType !== "INDIVIDUAL"`. Rello derives
+   * `entityNameNormalized` server-side via `normalizeEntityName`.
+   */
+  entityName?: string;
 }
 
 export interface UpdateLeadInput {

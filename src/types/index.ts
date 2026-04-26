@@ -13,6 +13,7 @@ export type {
   ContextCacheResponse,
   RecordOfflineInteractionInput,
   OfflineInteractionResponse,
+  EntityType,
 } from "./lead.js";
 
 export type {

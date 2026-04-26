@@ -64,6 +64,7 @@ export {
 export type {
   Lead,
   CreateLeadInput,
+  EntityType,
   UpdateLeadInput,
   ListLeadsParams,
   ConversionScore,
