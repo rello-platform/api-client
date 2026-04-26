@@ -26,7 +26,8 @@ interface CachedKey {
   id: string;
   appSource: string;
   keyHash: string;
-  permissions: readonly PermissionSlug[];
+  // '*' is the platform-wide-key wildcard semantic per CENTRALIZED-API-KEY-MIGRATION Session 2; first-class on the consumed contract.
+  permissions: readonly (PermissionSlug | "*")[];
 }
 
 /**
@@ -38,7 +39,8 @@ export interface PlatformCaller {
   /** The ApiKey record ID. */
   keyId: string;
   /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
-  permissions: readonly PermissionSlug[];
+  // '*' is the platform-wide-key wildcard semantic per CENTRALIZED-API-KEY-MIGRATION Session 2; first-class on the consumed contract.
+  permissions: readonly (PermissionSlug | "*")[];
 }
 
 /**
@@ -119,7 +121,7 @@ export function createPlatformKeyValidator(
           appSource: String(entry.appSource ?? ""),
           keyHash: String(entry.keyHash ?? ""),
           permissions: Array.isArray(entry.permissions)
-            ? (entry.permissions.map(String) as PermissionSlug[])
+            ? (entry.permissions.map(String) as (PermissionSlug | "*")[])
             : [],
         };
       });

@@ -1331,7 +1331,7 @@ interface PlatformCaller {
     /** The ApiKey record ID. */
     keyId: string;
     /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
-    permissions: readonly PermissionSlug[];
+    permissions: readonly (PermissionSlug | "*")[];
 }
 /**
  * Create a validator for inbound platform service-to-service calls.
