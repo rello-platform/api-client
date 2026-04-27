@@ -187,3 +187,16 @@ export function createPlatformKeyValidator(
     };
   };
 }
+
+/**
+ * Returns true if the caller has the platform-wide wildcard permission
+ * OR the specific required permission. Centralizes the wildcard-OR-specific
+ * pattern that 9 consumer repos previously duplicated locally.
+ */
+export function callerHasPermission(
+  caller: PlatformCaller,
+  required: PermissionSlug,
+): boolean {
+  if (caller.permissions.includes("*")) return true;
+  return caller.permissions.includes(required);
+}

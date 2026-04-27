@@ -1498,6 +1498,10 @@ function createPlatformKeyValidator(config) {
     };
   };
 }
+function callerHasPermission(caller, required) {
+  if (caller.permissions.includes("*")) return true;
+  return caller.permissions.includes(required);
+}
 
 // src/types/provisioning.ts
 import { z } from "zod";
@@ -1641,6 +1645,7 @@ export {
   RelloValidationError,
   ServiceClient,
   agentProvisionPayloadSchema,
+  callerHasPermission,
   createPlatformKeyValidator,
   createRelloClient,
   createServiceClient,
