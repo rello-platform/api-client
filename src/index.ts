@@ -3,6 +3,11 @@
 import { RelloClient, type RelloClientConfig } from "./client.js";
 import { ServiceClient, type ServiceClientConfig } from "./service-client.js";
 
+// --- URL normalizers (consolidated 2026-04-27 per PA-041) ---
+
+export { getRelloBaseUrl } from "./get-rello-base-url.js";
+export { getMiloBaseUrl } from "./get-milo-base-url.js";
+
 /**
  * Create a typed Rello API client. Reads config from env vars by default:
  *   RELLO_API_URL  — base URL (must NOT include "/api")

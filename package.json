@@ -1,6 +1,6 @@
 {
   "name": "@rello-platform/api-client",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Unified API client for Rello platform spoke apps",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,6 +19,7 @@
     "dev": "tsup --watch",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "tsup && node --test tests/*.test.mjs",
     "prepublishOnly": "npm run build",
     "openapi:generate": "npx openapi-typescript ../Rello/public/openapi.json -o src/generated/api-types.ts",
     "openapi:generate-remote": "npx openapi-typescript https://hellorello.app/api/openapi -o src/generated/api-types.ts"

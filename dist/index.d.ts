@@ -1306,6 +1306,48 @@ declare class RelloClient {
 }
 
 /**
+ * Canonical Rello API base URL normalizer.
+ *
+ * Strips trailing /api or /api/ from RELLO_API_URL so every caller can
+ * construct full paths from the domain root:
+ *   `${getRelloBaseUrl()}/api/v1/agent-profile`
+ *   `${getRelloBaseUrl()}/api/signals/batch`
+ *
+ * Guards against env-var misconfiguration where RELLO_API_URL includes
+ * /api (e.g. https://hellorello.app/api), which would otherwise produce
+ * double-prefix URLs like /api/api/v1/... → 404.
+ *
+ * Consolidated into @rello-platform/api-client v2.6.0; previously
+ * duplicated byte-identically across 9 spokes' src/lib/rello-url.ts.
+ *
+ * @see PTA-022 (original normalizer); PA-041 (consolidation)
+ */
+declare function getRelloBaseUrl(fallback?: string): string;
+
+/**
+ * Canonical Milo Engine base URL normalizer.
+ *
+ * Strips trailing /api or /api/ from MILO_API_URL so every caller can
+ * construct full paths from the domain root:
+ *   `${getMiloBaseUrl()}/api/decide`
+ *   `${getMiloBaseUrl()}/api/personalize-content`
+ *   `${getMiloBaseUrl()}/api/document-analyze`
+ *
+ * Guards against env-var misconfiguration where MILO_API_URL includes
+ * /api (e.g. https://milo-engine-production.up.railway.app/api), which
+ * would otherwise produce double-prefix URLs like /api/api/decide → 404.
+ *
+ * Mirrors the getRelloBaseUrl() shape exactly. Reads MILO_API_URL only
+ * (not MILO_ENGINE_URL — dual-name retirement is a separate workstream
+ * per PA-041 §5).
+ *
+ * @see PA-041 (the audit that surfaced the gap; PFP rate-sheet upload
+ *      was silent-404 broken end-to-end until 6c207d5 fixed the inline
+ *      URL construction).
+ */
+declare function getMiloBaseUrl(fallback?: string): string;
+
+/**
  * Configuration for the platform key validator.
  */
 interface PlatformKeyValidatorConfig {
@@ -1794,4 +1836,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceClient, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceClient, getMiloBaseUrl, getRelloBaseUrl, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
