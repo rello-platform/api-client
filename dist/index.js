@@ -1491,6 +1491,24 @@ function createPlatformKeyValidator(config) {
     await ensureFreshCache();
     const match = keyCache.find((k) => k.keyHash === tokenHash);
     if (!match) return null;
+    void (async () => {
+      try {
+        await fetch(`${baseUrl}/api/v1/platform/service-keys/touch`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.relloApiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ keyId: match.id }),
+          signal: AbortSignal.timeout(5e3)
+        });
+      } catch (error) {
+        console.warn(
+          "[PlatformKeyValidator] Failed to record key touch:",
+          error instanceof Error ? error.message : "unknown error"
+        );
+      }
+    })();
     return {
       appSource: match.appSource,
       keyId: match.id,
