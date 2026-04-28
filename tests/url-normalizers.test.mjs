@@ -86,6 +86,37 @@ test("getRelloBaseUrl: env-set value overrides fallback", () => {
   });
 });
 
+// v2.7.0 — defensive .trim() on (env || fallback) before regex strips.
+// Regression coverage for the e63a77d lockstep retrofit (operator-introduced
+// whitespace on Railway env values like MarketIntel's "https://...app ").
+
+test("getRelloBaseUrl: leading whitespace in env value is trimmed", () => {
+  withEnv("RELLO_API_URL", "  https://hellorello.app", () => {
+    assert.equal(getRelloBaseUrl(), "https://hellorello.app");
+  });
+});
+
+test("getRelloBaseUrl: trailing whitespace in env value is trimmed", () => {
+  withEnv("RELLO_API_URL", "https://hellorello.app  ", () => {
+    assert.equal(getRelloBaseUrl(), "https://hellorello.app");
+  });
+});
+
+test("getRelloBaseUrl: whitespace after trailing /api gets stripped (trim before regex)", () => {
+  withEnv("RELLO_API_URL", "https://hellorello.app/api  ", () => {
+    assert.equal(getRelloBaseUrl(), "https://hellorello.app");
+  });
+});
+
+test("getRelloBaseUrl: leading whitespace in fallback (env unset) is trimmed", () => {
+  withEnv("RELLO_API_URL", undefined, () => {
+    assert.equal(
+      getRelloBaseUrl("  https://hellorello.app"),
+      "https://hellorello.app"
+    );
+  });
+});
+
 // --- getMiloBaseUrl ---
 
 test("getMiloBaseUrl: canonical domain-root env passes through unchanged", () => {
@@ -153,6 +184,46 @@ test("getMiloBaseUrl: env-set value overrides fallback", () => {
     assert.equal(
       getMiloBaseUrl("https://fallback-milo.example.com"),
       "https://prod-milo.example.com"
+    );
+  });
+});
+
+// v2.7.0 — defensive .trim() on (env || fallback) before regex strips.
+// Regression coverage for the e63a77d lockstep retrofit; the canonical
+// e63a77d incident was MI's `MILO_API_URL=...app ` (trailing whitespace).
+
+test("getMiloBaseUrl: leading whitespace in env value is trimmed", () => {
+  withEnv("MILO_API_URL", "  https://milo-engine-production.up.railway.app", () => {
+    assert.equal(
+      getMiloBaseUrl(),
+      "https://milo-engine-production.up.railway.app"
+    );
+  });
+});
+
+test("getMiloBaseUrl: trailing whitespace in env value is trimmed", () => {
+  withEnv("MILO_API_URL", "https://milo-engine-production.up.railway.app  ", () => {
+    assert.equal(
+      getMiloBaseUrl(),
+      "https://milo-engine-production.up.railway.app"
+    );
+  });
+});
+
+test("getMiloBaseUrl: whitespace after trailing /api gets stripped (trim before regex)", () => {
+  withEnv("MILO_API_URL", "https://milo-engine-production.up.railway.app/api  ", () => {
+    assert.equal(
+      getMiloBaseUrl(),
+      "https://milo-engine-production.up.railway.app"
+    );
+  });
+});
+
+test("getMiloBaseUrl: leading whitespace in fallback (env unset) is trimmed", () => {
+  withEnv("MILO_API_URL", undefined, () => {
+    assert.equal(
+      getMiloBaseUrl("  https://milo-engine-production.up.railway.app"),
+      "https://milo-engine-production.up.railway.app"
     );
   });
 });

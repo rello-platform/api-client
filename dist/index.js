@@ -1423,13 +1423,13 @@ var RelloClient = class {
 
 // src/get-rello-base-url.ts
 function getRelloBaseUrl(fallback = "") {
-  const raw = process.env.RELLO_API_URL || fallback;
+  const raw = (process.env.RELLO_API_URL || fallback).trim();
   return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
 }
 
 // src/get-milo-base-url.ts
 function getMiloBaseUrl(fallback = "") {
-  const raw = process.env.MILO_API_URL || fallback;
+  const raw = (process.env.MILO_API_URL || fallback).trim();
   return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
 }
 
