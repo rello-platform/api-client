@@ -29,6 +29,37 @@ export interface Lead {
   referralSource: string | null;
   customFields: Record<string, unknown> | null;
   tenantId: string;
+  /**
+   * HomeReady assessment score (0-100). Mirrors Prisma `Lead.homeReadyScore` (Int?).
+   * Always present in `GET /api/v1/leads/[id]` response (Rello returns the full Prisma
+   * row); null when the lead has not yet been HomeReady-assessed.
+   */
+  homeReadyScore: number | null;
+  /**
+   * ISO-8601 timestamp of the last meaningful re-evaluation (HR assessment, HH rescore,
+   * positive call, score change ≥5). Mirrors Prisma `Lead.lastMeaningfulEvalAt`
+   * (DateTime?), serialized to a JSON string by `NextResponse.json`. Null when the
+   * lead has never had a meaningful re-evaluation event.
+   */
+  lastMeaningfulEvalAt: string | null;
+  /**
+   * Rello User ID of the explicitly-assigned agent. Mirrors Prisma
+   * `Lead.assignedAgentId` (String?). Null when the lead has no explicit agent
+   * assignment; spoke consumers typically prefer this over `ownerId` for
+   * agent-routing logic and fall back to `ownerId` when null.
+   */
+  assignedAgentId: string | null;
+  /**
+   * Rello User ID of the assigned MLO partner. Mirrors Prisma `Lead.assignedMloId`
+   * (String?). Null when the lead has no MLO co-assignment.
+   */
+  assignedMloId: string | null;
+  /**
+   * Rello User ID of the lead's owner (creator or routing-engine assignment).
+   * Mirrors Prisma `Lead.ownerId` (String?). Null when the lead is unassigned
+   * (rare — most flows guarantee an owner via routing).
+   */
+  ownerId: string | null;
   createdAt: string;
   updatedAt: string;
 }
