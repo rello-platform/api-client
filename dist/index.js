@@ -1532,6 +1532,84 @@ function callerHasPermission(caller, required) {
   if (caller.permissions.includes("*")) return true;
   return caller.permissions.includes(required);
 }
+function createServiceBearerGuard(config) {
+  return async function requireServiceBearer(request, opts) {
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return jsonResponse(
+        { success: false, error: "Missing Bearer token", code: "BEARER_MISSING" },
+        401
+      );
+    }
+    const validator = config.getValidator();
+    if (!validator) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Bearer auth is misconfigured on this service.",
+          code: "BEARER_UNAVAILABLE"
+        },
+        401
+      );
+    }
+    let caller;
+    try {
+      caller = await validator(request);
+    } catch (err) {
+      const path = safePath(request);
+      console.error(
+        `[platform-key-validator] Validator threw while resolving service Bearer on ${request.method} ${path}:`,
+        err
+      );
+      return jsonResponse(
+        {
+          success: false,
+          error: "Bearer validation failed.",
+          code: "BEARER_VALIDATION_ERROR"
+        },
+        401
+      );
+    }
+    if (!caller) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Invalid or expired Bearer token.",
+          code: "BEARER_INVALID"
+        },
+        401
+      );
+    }
+    if (!callerHasPermission(caller, opts.permission)) {
+      const path = safePath(request);
+      console.warn(
+        `[platform-key-validator] Caller ${caller.appSource} (key ${caller.keyId}) lacks "${opts.permission}" on ${request.method} ${path}. Held permissions: ${caller.permissions.join(", ") || "(none)"}.`
+      );
+      return jsonResponse(
+        {
+          success: false,
+          error: `Missing required permission: ${opts.permission}`,
+          code: "PERMISSION_DENIED"
+        },
+        403
+      );
+    }
+    return caller;
+  };
+}
+function jsonResponse(body, status) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}
+function safePath(request) {
+  try {
+    return new URL(request.url).pathname;
+  } catch {
+    return "(unknown)";
+  }
+}
 
 // src/types/provisioning.ts
 import { z } from "zod";
@@ -1678,6 +1756,7 @@ export {
   callerHasPermission,
   createPlatformKeyValidator,
   createRelloClient,
+  createServiceBearerGuard,
   createServiceClient,
   getMiloBaseUrl,
   getRelloBaseUrl,

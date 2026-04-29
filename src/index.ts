@@ -47,8 +47,10 @@ export { ServiceClient, type ServiceClientConfig } from "./service-client.js";
 export {
   createPlatformKeyValidator,
   callerHasPermission,
+  createServiceBearerGuard,
   type PlatformKeyValidatorConfig,
   type PlatformCaller,
+  type ServiceBearerGuardConfig,
 } from "./platform-key-validator.js";
 
 // Resource classes (for advanced consumers who need direct access)

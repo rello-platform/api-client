@@ -222,3 +222,149 @@ export function callerHasPermission(
   if (caller.permissions.includes("*")) return true;
   return caller.permissions.includes(required);
 }
+
+/**
+ * Configuration for the service Bearer guard factory.
+ */
+export interface ServiceBearerGuardConfig {
+  /**
+   * Resolves the validator at call time. Returning null fails-closed with
+   * `BEARER_UNAVAILABLE` (env misconfig, etc.). Each consumer wires this to
+   * their existing lazy-singleton `getValidator()` (typically built from
+   * `createPlatformKeyValidator` with the spoke's own `OWN_APP_SLUG` /
+   * env-var reads).
+   */
+  getValidator: () => ((request: Request) => Promise<PlatformCaller | null>) | null;
+}
+
+/**
+ * Create a fail-closed Bearer-only auth guard for inbound service-to-service
+ * routes. Returned function takes the inbound request + the required
+ * permission, validates the Bearer hash against Rello's ApiKey table via the
+ * configured validator, and returns either:
+ *   - `PlatformCaller` on success
+ *   - `Response` (401/403) the route handler should return verbatim
+ *
+ * Standard `Response` (not `NextResponse`) is returned so this helper stays
+ * framework-agnostic — Next.js route handlers accept standard Response
+ * returns, and `instanceof Response` matches both Response and NextResponse.
+ *
+ * Replaces per-spoke duplication of the same shape (NS Phase 5b
+ * `requireServiceBearer`, etc.). Closes the SHAPE-01-class env-var Bearer
+ * bypass on every spoke's inbound service surface — see Platform CLAUDE.md
+ * §Inter-App Auth: "NEVER add a `process.env.FOO_SECRET` Bearer-compare
+ * fallback alongside the ApiKey path."
+ *
+ * @example
+ *   // Spoke-side wiring (mirrors NS's pre-canonical local impl):
+ *   import { createServiceBearerGuard, createPlatformKeyValidator, getRelloBaseUrl } from "@rello-platform/api-client";
+ *
+ *   let _validator = null;
+ *   function getValidator() {
+ *     if (_validator) return _validator;
+ *     const url = getRelloBaseUrl();
+ *     const key = process.env.RELLO_API_KEY || process.env.RELLO_APP_SECRET;
+ *     if (!url || !key) return null;
+ *     _validator = createPlatformKeyValidator({ relloApiUrl: url, relloApiKey: key, ownAppSlug: "harvest-home" });
+ *     return _validator;
+ *   }
+ *
+ *   export const requireServiceBearer = createServiceBearerGuard({ getValidator });
+ *
+ *   // Route handler:
+ *   const auth = await requireServiceBearer(request, { permission: PERMISSIONS.PROVISIONING_WRITE.slug });
+ *   if (auth instanceof Response) return auth;
+ *   // auth is PlatformCaller — use auth.appSource / auth.keyId for logging.
+ */
+export function createServiceBearerGuard(
+  config: ServiceBearerGuardConfig,
+): (request: Request, opts: { permission: PermissionSlug }) => Promise<PlatformCaller | Response> {
+  return async function requireServiceBearer(
+    request: Request,
+    opts: { permission: PermissionSlug },
+  ): Promise<PlatformCaller | Response> {
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return jsonResponse(
+        { success: false, error: "Missing Bearer token", code: "BEARER_MISSING" },
+        401,
+      );
+    }
+
+    const validator = config.getValidator();
+    if (!validator) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Bearer auth is misconfigured on this service.",
+          code: "BEARER_UNAVAILABLE",
+        },
+        401,
+      );
+    }
+
+    let caller: PlatformCaller | null;
+    try {
+      caller = await validator(request);
+    } catch (err) {
+      const path = safePath(request);
+      console.error(
+        `[platform-key-validator] Validator threw while resolving service Bearer on ${request.method} ${path}:`,
+        err,
+      );
+      return jsonResponse(
+        {
+          success: false,
+          error: "Bearer validation failed.",
+          code: "BEARER_VALIDATION_ERROR",
+        },
+        401,
+      );
+    }
+
+    if (!caller) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Invalid or expired Bearer token.",
+          code: "BEARER_INVALID",
+        },
+        401,
+      );
+    }
+
+    if (!callerHasPermission(caller, opts.permission)) {
+      const path = safePath(request);
+      console.warn(
+        `[platform-key-validator] Caller ${caller.appSource} (key ${caller.keyId}) ` +
+          `lacks "${opts.permission}" on ${request.method} ${path}. ` +
+          `Held permissions: ${caller.permissions.join(", ") || "(none)"}.`,
+      );
+      return jsonResponse(
+        {
+          success: false,
+          error: `Missing required permission: ${opts.permission}`,
+          code: "PERMISSION_DENIED",
+        },
+        403,
+      );
+    }
+
+    return caller;
+  };
+}
+
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function safePath(request: Request): string {
+  try {
+    return new URL(request.url).pathname;
+  } catch {
+    return "(unknown)";
+  }
+}

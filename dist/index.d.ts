@@ -1436,6 +1436,61 @@ declare function createPlatformKeyValidator(config: PlatformKeyValidatorConfig):
  * pattern that 9 consumer repos previously duplicated locally.
  */
 declare function callerHasPermission(caller: PlatformCaller, required: PermissionSlug): boolean;
+/**
+ * Configuration for the service Bearer guard factory.
+ */
+interface ServiceBearerGuardConfig {
+    /**
+     * Resolves the validator at call time. Returning null fails-closed with
+     * `BEARER_UNAVAILABLE` (env misconfig, etc.). Each consumer wires this to
+     * their existing lazy-singleton `getValidator()` (typically built from
+     * `createPlatformKeyValidator` with the spoke's own `OWN_APP_SLUG` /
+     * env-var reads).
+     */
+    getValidator: () => ((request: Request) => Promise<PlatformCaller | null>) | null;
+}
+/**
+ * Create a fail-closed Bearer-only auth guard for inbound service-to-service
+ * routes. Returned function takes the inbound request + the required
+ * permission, validates the Bearer hash against Rello's ApiKey table via the
+ * configured validator, and returns either:
+ *   - `PlatformCaller` on success
+ *   - `Response` (401/403) the route handler should return verbatim
+ *
+ * Standard `Response` (not `NextResponse`) is returned so this helper stays
+ * framework-agnostic — Next.js route handlers accept standard Response
+ * returns, and `instanceof Response` matches both Response and NextResponse.
+ *
+ * Replaces per-spoke duplication of the same shape (NS Phase 5b
+ * `requireServiceBearer`, etc.). Closes the SHAPE-01-class env-var Bearer
+ * bypass on every spoke's inbound service surface — see Platform CLAUDE.md
+ * §Inter-App Auth: "NEVER add a `process.env.FOO_SECRET` Bearer-compare
+ * fallback alongside the ApiKey path."
+ *
+ * @example
+ *   // Spoke-side wiring (mirrors NS's pre-canonical local impl):
+ *   import { createServiceBearerGuard, createPlatformKeyValidator, getRelloBaseUrl } from "@rello-platform/api-client";
+ *
+ *   let _validator = null;
+ *   function getValidator() {
+ *     if (_validator) return _validator;
+ *     const url = getRelloBaseUrl();
+ *     const key = process.env.RELLO_API_KEY || process.env.RELLO_APP_SECRET;
+ *     if (!url || !key) return null;
+ *     _validator = createPlatformKeyValidator({ relloApiUrl: url, relloApiKey: key, ownAppSlug: "harvest-home" });
+ *     return _validator;
+ *   }
+ *
+ *   export const requireServiceBearer = createServiceBearerGuard({ getValidator });
+ *
+ *   // Route handler:
+ *   const auth = await requireServiceBearer(request, { permission: PERMISSIONS.PROVISIONING_WRITE.slug });
+ *   if (auth instanceof Response) return auth;
+ *   // auth is PlatformCaller — use auth.appSource / auth.keyId for logging.
+ */
+declare function createServiceBearerGuard(config: ServiceBearerGuardConfig): (request: Request, opts: {
+    permission: PermissionSlug;
+}) => Promise<PlatformCaller | Response>;
 
 /**
  * Base error class for all Rello API errors.
@@ -1860,4 +1915,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceClient, getMiloBaseUrl, getRelloBaseUrl, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getMiloBaseUrl, getRelloBaseUrl, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
