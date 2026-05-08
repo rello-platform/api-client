@@ -119,6 +119,14 @@ export type {
   LogAiUsageResponse,
 } from "./admin.js";
 
+export type {
+  AddressNormalizeFreeFormInput,
+  AddressNormalizePreSplitInput,
+  AddressNormalizeRequest,
+  AddressNormalizeMatchedBy,
+  AddressNormalizeResponse,
+} from "./address-normalize.js";
+
 export {
   provisionedAgentSchema,
   tenantEnablePayloadSchema,

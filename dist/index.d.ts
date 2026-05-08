@@ -773,6 +773,64 @@ interface AppInfo {
     appSourceKey: string | null;
 }
 
+/**
+ * SPEC-PE-ADDRESS-NORMALIZE — typed contract for the
+ * `POST /api/address-normalize` endpoint hosted by Property Engine.
+ *
+ * Consumers reach this surface via:
+ *
+ *   const pe = await rello.service("property-engine");
+ *   const out = await pe.addressNormalize({ rawAddress: "..." }, tenantId);
+ *
+ * Spec body lives in iCloud:
+ *   `RELLO TO BE BUILT/BUILD-|-FEATURE-ADDS/PE ADDRESS NORMALIZE/SPEC-PE-ADDRESS-NORMALIZE.md`
+ *
+ * Design lock — Parcel registry is platform-shared (NOT tenant-scoped); FIPS
+ * resolution is via `FipsMapping`, not `Parcel.fips` (which doesn't exist).
+ * `tenantId` is REQUIRED for auth + audit-logging only — it does NOT narrow
+ * the Parcel match. Recorded in
+ * `RELLO TO BE BUILT/APP REBUILDS/~DISCOVERED-PROMPTS/DONE/IMPL-AGENT-UNHALT-PE-ADDRESS-NORMALIZE-PARCEL-SCOPING-LOCK.md`.
+ */
+/** Free-form input variant — comma-separated address string. */
+interface AddressNormalizeFreeFormInput {
+    rawAddress: string;
+    /** Optional 2-letter / full-name state override when rawAddress lacks one. */
+    state?: string | null;
+}
+/** Pre-split input variant — caller already has structured fields. */
+interface AddressNormalizePreSplitInput {
+    streetAddress: string;
+    city: string;
+    state: string;
+    zipCode: string;
+    unit?: string | null;
+    county?: string | null;
+    apn?: string | null;
+}
+type AddressNormalizeRequest = AddressNormalizeFreeFormInput | AddressNormalizePreSplitInput;
+type AddressNormalizeMatchedBy = "apn-county" | "address-fallback" | "none";
+interface AddressNormalizeResponse {
+    success: true;
+    /** Human-readable canonical form: "<street>, <city>, <STATE> <zip>". */
+    canonicalAddress: string;
+    normalizedComponents: {
+        streetAddress: string;
+        city: string;
+        state: string;
+        zipCode: string;
+        unit: string | null;
+        county: string | null;
+        apn: string | null;
+    };
+    parcelResolution: {
+        /** Platform-shared Parcel.id; null when no natural-key match. */
+        parcelId: string | null;
+        /** 5-digit county FIPS via `FipsMapping(zipCode)`; null when no mapping exists. */
+        fips: string | null;
+        matchedBy: AddressNormalizeMatchedBy;
+    };
+}
+
 interface ServiceClientConfig {
     /** Base URL of the target service (e.g., process.env.NEWSLETTER_STUDIO_URL). */
     baseUrl: string;
@@ -801,6 +859,19 @@ declare class ServiceClient {
     post<T>(path: string, body: unknown, tenantId?: string): Promise<T>;
     get<T>(path: string, tenantId?: string): Promise<T>;
     patch<T>(path: string, body: unknown, tenantId?: string): Promise<T>;
+    /**
+     * SPEC-PE-ADDRESS-NORMALIZE — canonical address normalization +
+     * platform-shared Parcel resolution + FipsMapping FIPS lookup.
+     *
+     * Only meaningful when this `ServiceClient` is bound to Property Engine
+     * (e.g. via `rello.service("property-engine")`). Other targets will 404.
+     *
+     * `tenantId` is REQUIRED — Property Engine returns 400 if the
+     * `X-Tenant-Id` header is absent. It does NOT narrow the Parcel result;
+     * Parcel is a platform-shared registry. Use `tenantId` for the audit
+     * trail dimension and to pass the receiver's auth gate.
+     */
+    addressNormalize(input: AddressNormalizeRequest, tenantId: string): Promise<AddressNormalizeResponse>;
     private request;
 }
 
@@ -1946,4 +2017,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getMiloBaseUrl, getRelloBaseUrl, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getMiloBaseUrl, getRelloBaseUrl, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };

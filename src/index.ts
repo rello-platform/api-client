@@ -134,6 +134,11 @@ export type {
   ValidatedTenant,
   LogAiUsageInput,
   LogAiUsageResponse,
+  AddressNormalizeFreeFormInput,
+  AddressNormalizePreSplitInput,
+  AddressNormalizeRequest,
+  AddressNormalizeMatchedBy,
+  AddressNormalizeResponse,
 } from "./types/index.js";
 
 // Provisioning schemas + runtime validators

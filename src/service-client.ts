@@ -10,6 +10,10 @@ import {
 } from "./errors.js";
 import { withRetry } from "./retry.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
+import type {
+  AddressNormalizeRequest,
+  AddressNormalizeResponse,
+} from "./types/address-normalize.js";
 
 export interface ServiceClientConfig {
   /** Base URL of the target service (e.g., process.env.NEWSLETTER_STUDIO_URL). */
@@ -67,6 +71,29 @@ export class ServiceClient {
     tenantId?: string
   ): Promise<T> {
     return this.request<T>("PATCH", path, body, tenantId);
+  }
+
+  /**
+   * SPEC-PE-ADDRESS-NORMALIZE — canonical address normalization +
+   * platform-shared Parcel resolution + FipsMapping FIPS lookup.
+   *
+   * Only meaningful when this `ServiceClient` is bound to Property Engine
+   * (e.g. via `rello.service("property-engine")`). Other targets will 404.
+   *
+   * `tenantId` is REQUIRED — Property Engine returns 400 if the
+   * `X-Tenant-Id` header is absent. It does NOT narrow the Parcel result;
+   * Parcel is a platform-shared registry. Use `tenantId` for the audit
+   * trail dimension and to pass the receiver's auth gate.
+   */
+  async addressNormalize(
+    input: AddressNormalizeRequest,
+    tenantId: string,
+  ): Promise<AddressNormalizeResponse> {
+    return this.post<AddressNormalizeResponse>(
+      "/api/address-normalize",
+      input,
+      tenantId,
+    );
   }
 
   private async request<T>(
