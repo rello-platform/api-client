@@ -17,6 +17,20 @@ export interface PlatformKeyValidatorConfig {
   ownAppSlug: string;
   /** Cache TTL in milliseconds. Default: 300000 (5 minutes). */
   cacheTtlMs?: number;
+  /**
+   * Maximum staleness window beyond TTL expiry during which the validator
+   * will serve last-good cache when the upstream Rello service-keys endpoint
+   * returns 5xx, network error, or timeout. Past this window the validator
+   * fails closed (returns null on every inbound). 4xx responses always
+   * fail-closed (no stale-serve) to avoid masking credential drift.
+   *
+   * Default: 1800000 (30 minutes). Total worst-case stale window =
+   * cacheTtlMs + staleServeMaxMs (35 min default).
+   *
+   * Set to 0 to disable stale-serve (fail-closed on the first 5xx after
+   * cache populate — equivalent to v2.10.0 and earlier behavior).
+   */
+  staleServeMaxMs?: number;
 }
 
 /**
@@ -73,24 +87,38 @@ export interface PlatformCaller {
  *   }
  *   console.log(`Authenticated caller: ${caller.appSource}`);
  */
+type FetchStatus = "init" | "ok" | "5xx" | "4xx" | "network" | "timeout";
+
 export function createPlatformKeyValidator(
   config: PlatformKeyValidatorConfig
 ): (request: Request) => Promise<PlatformCaller | null> {
   const baseUrl = config.relloApiUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
   const targetApp = config.ownAppSlug.toUpperCase().replace(/-/g, "_");
   const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
+  const staleServeMaxMs = config.staleServeMaxMs ?? 30 * 60 * 1000;
 
   let keyCache: CachedKey[] = [];
+  // Time of last refresh ATTEMPT — bumped on every fetch (success or failure).
+  // Used by ensureFreshCache to throttle the refresh cadence.
   let lastFetchTime = 0;
+  // Time of last SUCCESSFUL refresh — bumped only on a 200 with valid body.
+  // Used at the read site to compute staleness for stale-serve eligibility.
+  let lastSuccessTime = 0;
+  let lastFetchStatus: FetchStatus = "init";
+  let staleServeWarningEmitted = false;
+  let capExceedWarningEmitted = false;
   let fetchInProgress: Promise<void> | null = null;
 
   /**
-   * Fetch expected keys from Rello. Updates the cache on success.
-   * On failure, logs a warning and leaves the stale cache in place.
+   * Fetch expected keys from Rello.
+   * - 200 + valid body → replace cache, mark `ok`, reset emit-once flags.
+   * - 5xx → leave cache untouched, mark `5xx` (read site stale-serves if cache populated).
+   * - 4xx → leave cache untouched, mark `4xx` (read site fail-closes — masks credential drift if served).
+   * - Network error → mark `network`. Timeout → mark `timeout`. Both eligible for stale-serve.
    */
   async function refreshCache(): Promise<void> {
+    const url = `${baseUrl}/api/v1/platform/service-keys?targetApp=${encodeURIComponent(targetApp)}`;
     try {
-      const url = `${baseUrl}/api/v1/platform/service-keys?targetApp=${encodeURIComponent(targetApp)}`;
       const res = await fetch(url, {
         headers: {
           Authorization: `Bearer ${config.relloApiKey}`,
@@ -99,10 +127,20 @@ export function createPlatformKeyValidator(
         signal: AbortSignal.timeout(10_000),
       });
 
+      lastFetchTime = Date.now();
+
       if (!res.ok) {
-        console.warn(
-          `[PlatformKeyValidator] Failed to fetch service keys: ${res.status} ${res.statusText}`
-        );
+        if (res.status >= 500) {
+          lastFetchStatus = "5xx";
+          console.warn(
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (will stale-serve if cache populated)`
+          );
+        } else {
+          lastFetchStatus = "4xx";
+          console.warn(
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx — fail-closed; check RELLO_API_KEY for credential drift)`
+          );
+        }
         return;
       }
 
@@ -110,7 +148,9 @@ export function createPlatformKeyValidator(
       const keys: unknown[] = data.keys;
 
       if (!Array.isArray(keys)) {
-        console.warn("[PlatformKeyValidator] Invalid response: keys is not an array");
+        // Treat malformed body as upstream failure — preserve cache, allow stale-serve.
+        lastFetchStatus = "5xx";
+        console.warn("[platform-key-validator] Invalid response: keys is not an array (treating as 5xx)");
         return;
       }
 
@@ -126,14 +166,20 @@ export function createPlatformKeyValidator(
         };
       });
 
-      lastFetchTime = Date.now();
+      lastSuccessTime = lastFetchTime;
+      lastFetchStatus = "ok";
+      // Recovery — reset emit-once gates so future failures warn fresh.
+      staleServeWarningEmitted = false;
+      capExceedWarningEmitted = false;
     } catch (error) {
-      // Network error or timeout — keep using stale cache
+      lastFetchTime = Date.now();
       if (error instanceof DOMException && error.name === "AbortError") {
-        console.warn("[PlatformKeyValidator] Rello request timed out, using cached keys");
+        lastFetchStatus = "timeout";
+        console.warn("[platform-key-validator] Rello request timed out (will stale-serve if cache populated)");
       } else {
+        lastFetchStatus = "network";
         console.warn(
-          "[PlatformKeyValidator] Rello unreachable, using cached keys:",
+          "[platform-key-validator] Rello unreachable (will stale-serve if cache populated):",
           error instanceof Error ? error.message : "unknown error"
         );
       }
@@ -143,6 +189,9 @@ export function createPlatformKeyValidator(
   /**
    * Ensure the cache is fresh. Deduplicates concurrent refresh calls
    * so multiple simultaneous requests don't all hit Rello.
+   *
+   * `lastFetchTime` is bumped on every attempt (success or failure), so the
+   * refresh cadence is preserved at `cacheTtlMs` regardless of upstream state.
    */
   async function ensureFreshCache(): Promise<void> {
     if (Date.now() - lastFetchTime < cacheTtlMs) return;
@@ -175,6 +224,39 @@ export function createPlatformKeyValidator(
 
     // Ensure cache is fresh
     await ensureFreshCache();
+
+    // Stale-serve decision tree.
+    // Pre-first-success → fail-closed (no cache to serve). Same as v2.10.0.
+    if (lastSuccessTime === 0) return null;
+
+    // 4xx fetch failure → fail-closed (don't mask credential drift).
+    if (lastFetchStatus === "4xx") return null;
+
+    // Upstream is degraded (5xx / network / timeout) and cache is populated:
+    // stale-serve up to cacheTtlMs + staleServeMaxMs since last success, then fail-closed.
+    if (
+      lastFetchStatus === "5xx" ||
+      lastFetchStatus === "network" ||
+      lastFetchStatus === "timeout"
+    ) {
+      const staleAgeMs = Date.now() - lastSuccessTime;
+      const capMs = cacheTtlMs + staleServeMaxMs;
+      if (staleAgeMs > capMs) {
+        if (!capExceedWarningEmitted) {
+          console.warn(
+            `[platform-key-validator] WARN cache exceeded stale-serve cap age_ms=${staleAgeMs} capMs=${capMs} reason=upstream-${lastFetchStatus} — fail-closed until next successful refresh`
+          );
+          capExceedWarningEmitted = true;
+        }
+        return null;
+      }
+      if (!staleServeWarningEmitted) {
+        console.warn(
+          `[platform-key-validator] WARN serving stale cache age_ms=${staleAgeMs} reason=upstream-${lastFetchStatus}`
+        );
+        staleServeWarningEmitted = true;
+      }
+    }
 
     // Find a matching key by hash
     const match = keyCache.find((k) => k.keyHash === tokenHash);

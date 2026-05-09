@@ -1489,6 +1489,20 @@ interface PlatformKeyValidatorConfig {
     ownAppSlug: string;
     /** Cache TTL in milliseconds. Default: 300000 (5 minutes). */
     cacheTtlMs?: number;
+    /**
+     * Maximum staleness window beyond TTL expiry during which the validator
+     * will serve last-good cache when the upstream Rello service-keys endpoint
+     * returns 5xx, network error, or timeout. Past this window the validator
+     * fails closed (returns null on every inbound). 4xx responses always
+     * fail-closed (no stale-serve) to avoid masking credential drift.
+     *
+     * Default: 1800000 (30 minutes). Total worst-case stale window =
+     * cacheTtlMs + staleServeMaxMs (35 min default).
+     *
+     * Set to 0 to disable stale-serve (fail-closed on the first 5xx after
+     * cache populate — equivalent to v2.10.0 and earlier behavior).
+     */
+    staleServeMaxMs?: number;
 }
 /**
  * Result of a successful caller validation.
@@ -1501,36 +1515,6 @@ interface PlatformCaller {
     /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
     permissions: readonly (PermissionSlug | "*")[];
 }
-/**
- * Create a validator for inbound platform service-to-service calls.
- *
- * The returned function authenticates incoming requests by:
- *   1. Extracting the Bearer token from the Authorization header
- *   2. SHA-256 hashing the token
- *   3. Comparing the hash against keys fetched from Rello (cached 5 min)
- *
- * Identity comes from the token itself — not from X-App-Slug. The caller
- * is identified by which key they hold, preventing self-reported identity spoofing.
- *
- * Graceful degradation: if Rello is unreachable, the last-known key cache
- * is used. Keys don't rotate often, so stale data is safer than failing auth.
- *
- * @example
- *   import { createPlatformKeyValidator } from "@rello-platform/api-client";
- *
- *   const validateCaller = createPlatformKeyValidator({
- *     relloApiUrl: process.env.RELLO_API_URL!,
- *     relloApiKey: process.env.RELLO_API_KEY!,
- *     ownAppSlug: process.env.APP_SLUG!,
- *   });
- *
- *   // In a route handler or middleware:
- *   const caller = await validateCaller(request);
- *   if (!caller) {
- *     return new Response("Unauthorized", { status: 401 });
- *   }
- *   console.log(`Authenticated caller: ${caller.appSource}`);
- */
 declare function createPlatformKeyValidator(config: PlatformKeyValidatorConfig): (request: Request) => Promise<PlatformCaller | null>;
 /**
  * Returns true if the caller has the platform-wide wildcard permission

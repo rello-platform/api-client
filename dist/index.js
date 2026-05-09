@@ -1458,12 +1458,17 @@ function createPlatformKeyValidator(config) {
   const baseUrl = config.relloApiUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
   const targetApp = config.ownAppSlug.toUpperCase().replace(/-/g, "_");
   const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1e3;
+  const staleServeMaxMs = config.staleServeMaxMs ?? 30 * 60 * 1e3;
   let keyCache = [];
   let lastFetchTime = 0;
+  let lastSuccessTime = 0;
+  let lastFetchStatus = "init";
+  let staleServeWarningEmitted = false;
+  let capExceedWarningEmitted = false;
   let fetchInProgress = null;
   async function refreshCache() {
+    const url = `${baseUrl}/api/v1/platform/service-keys?targetApp=${encodeURIComponent(targetApp)}`;
     try {
-      const url = `${baseUrl}/api/v1/platform/service-keys?targetApp=${encodeURIComponent(targetApp)}`;
       const res = await fetch(url, {
         headers: {
           Authorization: `Bearer ${config.relloApiKey}`,
@@ -1471,16 +1476,26 @@ function createPlatformKeyValidator(config) {
         },
         signal: AbortSignal.timeout(1e4)
       });
+      lastFetchTime = Date.now();
       if (!res.ok) {
-        console.warn(
-          `[PlatformKeyValidator] Failed to fetch service keys: ${res.status} ${res.statusText}`
-        );
+        if (res.status >= 500) {
+          lastFetchStatus = "5xx";
+          console.warn(
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (will stale-serve if cache populated)`
+          );
+        } else {
+          lastFetchStatus = "4xx";
+          console.warn(
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx \u2014 fail-closed; check RELLO_API_KEY for credential drift)`
+          );
+        }
         return;
       }
       const data = await res.json();
       const keys = data.keys;
       if (!Array.isArray(keys)) {
-        console.warn("[PlatformKeyValidator] Invalid response: keys is not an array");
+        lastFetchStatus = "5xx";
+        console.warn("[platform-key-validator] Invalid response: keys is not an array (treating as 5xx)");
         return;
       }
       keyCache = keys.map((k) => {
@@ -1492,13 +1507,19 @@ function createPlatformKeyValidator(config) {
           permissions: Array.isArray(entry.permissions) ? entry.permissions.map(String) : []
         };
       });
-      lastFetchTime = Date.now();
+      lastSuccessTime = lastFetchTime;
+      lastFetchStatus = "ok";
+      staleServeWarningEmitted = false;
+      capExceedWarningEmitted = false;
     } catch (error) {
+      lastFetchTime = Date.now();
       if (error instanceof DOMException && error.name === "AbortError") {
-        console.warn("[PlatformKeyValidator] Rello request timed out, using cached keys");
+        lastFetchStatus = "timeout";
+        console.warn("[platform-key-validator] Rello request timed out (will stale-serve if cache populated)");
       } else {
+        lastFetchStatus = "network";
         console.warn(
-          "[PlatformKeyValidator] Rello unreachable, using cached keys:",
+          "[platform-key-validator] Rello unreachable (will stale-serve if cache populated):",
           error instanceof Error ? error.message : "unknown error"
         );
       }
@@ -1520,6 +1541,27 @@ function createPlatformKeyValidator(config) {
     if (!token) return null;
     const tokenHash = createHash("sha256").update(token).digest("hex");
     await ensureFreshCache();
+    if (lastSuccessTime === 0) return null;
+    if (lastFetchStatus === "4xx") return null;
+    if (lastFetchStatus === "5xx" || lastFetchStatus === "network" || lastFetchStatus === "timeout") {
+      const staleAgeMs = Date.now() - lastSuccessTime;
+      const capMs = cacheTtlMs + staleServeMaxMs;
+      if (staleAgeMs > capMs) {
+        if (!capExceedWarningEmitted) {
+          console.warn(
+            `[platform-key-validator] WARN cache exceeded stale-serve cap age_ms=${staleAgeMs} capMs=${capMs} reason=upstream-${lastFetchStatus} \u2014 fail-closed until next successful refresh`
+          );
+          capExceedWarningEmitted = true;
+        }
+        return null;
+      }
+      if (!staleServeWarningEmitted) {
+        console.warn(
+          `[platform-key-validator] WARN serving stale cache age_ms=${staleAgeMs} reason=upstream-${lastFetchStatus}`
+        );
+        staleServeWarningEmitted = true;
+      }
+    }
     const match = keyCache.find((k) => k.keyHash === tokenHash);
     if (!match) return null;
     void (async () => {
