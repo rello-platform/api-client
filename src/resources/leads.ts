@@ -29,7 +29,11 @@ export class LeadsResource {
   }
 
   async get(tenantId: string, id: string): Promise<Lead> {
-    return this.transport.get<Lead>(`/leads/${id}`, tenantId);
+    const res = await this.transport.get<{ lead: Lead } | Lead>(
+      `/leads/${id}`,
+      tenantId
+    );
+    return "lead" in res ? res.lead : res;
   }
 
   async update(tenantId: string, id: string, data: UpdateLeadInput): Promise<Lead> {

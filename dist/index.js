@@ -314,7 +314,11 @@ var LeadsResource = class {
     return "lead" in res ? res.lead : res;
   }
   async get(tenantId, id) {
-    return this.transport.get(`/leads/${id}`, tenantId);
+    const res = await this.transport.get(
+      `/leads/${id}`,
+      tenantId
+    );
+    return "lead" in res ? res.lead : res;
   }
   async update(tenantId, id, data) {
     const res = await this.transport.patch(
