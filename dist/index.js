@@ -1382,7 +1382,7 @@ var AdminResource = class {
 var RelloClient = class {
   constructor(config = {}) {
     const baseUrl = config.baseUrl ?? process.env.RELLO_API_URL ?? "";
-    const apiKey = config.apiKey ?? process.env.RELLO_APP_SECRET ?? process.env.RELLO_API_KEY ?? "";
+    const apiKey = config.apiKey ?? process.env.RELLO_API_KEY ?? "";
     const appSlug = config.appSlug ?? process.env.APP_SLUG ?? process.env.RELLO_APP_SLUG ?? "";
     if (!baseUrl) {
       throw new Error(

@@ -11,7 +11,7 @@ export { getMiloBaseUrl } from "./get-milo-base-url.js";
 /**
  * Create a typed Rello API client. Reads config from env vars by default:
  *   RELLO_API_URL  — base URL (must NOT include "/api")
- *   RELLO_API_KEY  — API key (falls back to RELLO_APP_SECRET)
+ *   RELLO_API_KEY  — API key (required if not passed in config)
  *   APP_SLUG       — this app's slug identifier
  *
  * @example

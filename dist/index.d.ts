@@ -1348,7 +1348,7 @@ declare class AdminResource {
 interface RelloClientConfig {
     /** Rello API base URL. Default: RELLO_API_URL env var. Must NOT include "/api". */
     baseUrl?: string;
-    /** API key for authentication. Default: RELLO_API_KEY or RELLO_APP_SECRET env var. */
+    /** API key for authentication. Default: RELLO_API_KEY env var. */
     apiKey?: string;
     /** This app's slug identifier. Default: APP_SLUG env var. */
     appSlug?: string;
@@ -1561,7 +1561,7 @@ interface ServiceBearerGuardConfig {
  *   function getValidator() {
  *     if (_validator) return _validator;
  *     const url = getRelloBaseUrl();
- *     const key = process.env.RELLO_API_KEY || process.env.RELLO_APP_SECRET;
+ *     const key = process.env.RELLO_API_KEY;
  *     if (!url || !key) return null;
  *     _validator = createPlatformKeyValidator({ relloApiUrl: url, relloApiKey: key, ownAppSlug: "harvest-home" });
  *     return _validator;
@@ -1979,7 +1979,7 @@ declare function parseAgentPayload(body: unknown): {
 /**
  * Create a typed Rello API client. Reads config from env vars by default:
  *   RELLO_API_URL  — base URL (must NOT include "/api")
- *   RELLO_API_KEY  — API key (falls back to RELLO_APP_SECRET)
+ *   RELLO_API_KEY  — API key (required if not passed in config)
  *   APP_SLUG       — this app's slug identifier
  *
  * @example

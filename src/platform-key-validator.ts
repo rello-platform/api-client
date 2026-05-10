@@ -345,7 +345,7 @@ export interface ServiceBearerGuardConfig {
  *   function getValidator() {
  *     if (_validator) return _validator;
  *     const url = getRelloBaseUrl();
- *     const key = process.env.RELLO_API_KEY || process.env.RELLO_APP_SECRET;
+ *     const key = process.env.RELLO_API_KEY;
  *     if (!url || !key) return null;
  *     _validator = createPlatformKeyValidator({ relloApiUrl: url, relloApiKey: key, ownAppSlug: "harvest-home" });
  *     return _validator;

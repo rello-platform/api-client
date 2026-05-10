@@ -24,7 +24,7 @@ import type { ServiceClient } from "./service-client.js";
 export interface RelloClientConfig {
   /** Rello API base URL. Default: RELLO_API_URL env var. Must NOT include "/api". */
   baseUrl?: string;
-  /** API key for authentication. Default: RELLO_API_KEY or RELLO_APP_SECRET env var. */
+  /** API key for authentication. Default: RELLO_API_KEY env var. */
   apiKey?: string;
   /** This app's slug identifier. Default: APP_SLUG env var. */
   appSlug?: string;
@@ -76,7 +76,6 @@ export class RelloClient {
       ?? "";
 
     const apiKey = config.apiKey
-      ?? process.env.RELLO_APP_SECRET
       ?? process.env.RELLO_API_KEY
       ?? "";
 
