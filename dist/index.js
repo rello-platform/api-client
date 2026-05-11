@@ -1456,6 +1456,12 @@ function getMiloBaseUrl(fallback = "") {
   return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
 }
 
+// src/get-harvest-home-base-url.ts
+function getHarvestHomeBaseUrl(fallback = "") {
+  const raw = (process.env.HH_INTAKE_URL || fallback).trim();
+  return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+}
+
 // src/platform-key-validator.ts
 import { createHash } from "crypto";
 function createPlatformKeyValidator(config) {
@@ -1823,6 +1829,7 @@ export {
   createRelloClient,
   createServiceBearerGuard,
   createServiceClient,
+  getHarvestHomeBaseUrl,
   getMiloBaseUrl,
   getRelloBaseUrl,
   parseAgentPayload,

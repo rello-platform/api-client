@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getRelloBaseUrl, getMiloBaseUrl } from "../dist/index.js";
+import { getRelloBaseUrl, getMiloBaseUrl, getHarvestHomeBaseUrl } from "../dist/index.js";
 
 // Helper to swap env around a test without leaking state.
 function withEnv(key, value, fn) {
@@ -228,6 +228,98 @@ test("getMiloBaseUrl: leading whitespace in fallback (env unset) is trimmed", ()
   });
 });
 
+// --- getHarvestHomeBaseUrl ---
+
+test("getHarvestHomeBaseUrl: canonical domain-root env passes through unchanged", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: legacy /api-suffixed env strips /api", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app/api", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: legacy /api/-suffixed env strips /api/", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app/api/", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: trailing-slash-only env strips slash", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app/", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: multiple trailing slashes all stripped", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app///", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: missing env with no fallback returns empty string", () => {
+  withEnv("HH_INTAKE_URL", undefined, () => {
+    assert.equal(getHarvestHomeBaseUrl(), "");
+  });
+});
+
+test("getHarvestHomeBaseUrl: missing env uses fallback when provided", () => {
+  withEnv("HH_INTAKE_URL", undefined, () => {
+    assert.equal(
+      getHarvestHomeBaseUrl("https://harvesthome.app"),
+      "https://harvesthome.app"
+    );
+  });
+});
+
+test("getHarvestHomeBaseUrl: fallback also gets /api stripped", () => {
+  withEnv("HH_INTAKE_URL", undefined, () => {
+    assert.equal(
+      getHarvestHomeBaseUrl("https://harvesthome.app/api"),
+      "https://harvesthome.app"
+    );
+  });
+});
+
+test("getHarvestHomeBaseUrl: env-set value overrides fallback", () => {
+  withEnv("HH_INTAKE_URL", "https://prod.harvesthome.app", () => {
+    assert.equal(
+      getHarvestHomeBaseUrl("https://staging.harvesthome.app"),
+      "https://prod.harvesthome.app"
+    );
+  });
+});
+
+test("getHarvestHomeBaseUrl: leading whitespace in env value is trimmed", () => {
+  withEnv("HH_INTAKE_URL", "  https://harvesthome.app", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: trailing whitespace in env value is trimmed", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app  ", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: whitespace after trailing /api gets stripped (trim before regex)", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app/api  ", () => {
+    assert.equal(getHarvestHomeBaseUrl(), "https://harvesthome.app");
+  });
+});
+
+test("getHarvestHomeBaseUrl: leading whitespace in fallback (env unset) is trimmed", () => {
+  withEnv("HH_INTAKE_URL", undefined, () => {
+    assert.equal(
+      getHarvestHomeBaseUrl("  https://harvesthome.app"),
+      "https://harvesthome.app"
+    );
+  });
+});
+
 // --- Independence: helpers read distinct env vars ---
 
 test("helpers are independent: setting RELLO_API_URL does not affect getMiloBaseUrl", () => {
@@ -242,6 +334,30 @@ test("helpers are independent: setting MILO_API_URL does not affect getRelloBase
   withEnv("MILO_API_URL", "https://milo-engine-production.up.railway.app", () => {
     withEnv("RELLO_API_URL", undefined, () => {
       assert.equal(getRelloBaseUrl(), "");
+    });
+  });
+});
+
+test("helpers are independent: setting RELLO_API_URL does not affect getHarvestHomeBaseUrl", () => {
+  withEnv("RELLO_API_URL", "https://hellorello.app", () => {
+    withEnv("HH_INTAKE_URL", undefined, () => {
+      assert.equal(getHarvestHomeBaseUrl(), "");
+    });
+  });
+});
+
+test("helpers are independent: setting HH_INTAKE_URL does not affect getRelloBaseUrl", () => {
+  withEnv("HH_INTAKE_URL", "https://harvesthome.app", () => {
+    withEnv("RELLO_API_URL", undefined, () => {
+      assert.equal(getRelloBaseUrl(), "");
+    });
+  });
+});
+
+test("helpers are independent: setting MILO_API_URL does not affect getHarvestHomeBaseUrl", () => {
+  withEnv("MILO_API_URL", "https://milo-engine-production.up.railway.app", () => {
+    withEnv("HH_INTAKE_URL", undefined, () => {
+      assert.equal(getHarvestHomeBaseUrl(), "");
     });
   });
 });
