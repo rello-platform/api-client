@@ -469,6 +469,28 @@ var LeadsResource = class {
     );
   }
   /**
+   * Fetch the lead's Rello-platform-closed loans from the
+   * `ClosingTransaction` model.
+   *
+   * GET /api/leads/:id/closed-loans (non-v1 route — uses `getRaw`)
+   *
+   * Server query: `status: "CLOSING_COMPLETED"`, ordered by `closedAt` desc
+   * with `actualClosingDate` desc fallback. Returns null when no closed-loan
+   * row exists for the lead (Hub then falls back to Flueid `hh_lien1_*`
+   * customFields or the "unavailable" empty-state).
+   *
+   * Used by HS Hub data-assembly (`fetchMortgageBlock`) per HHUB B-04
+   * amended lock — ClosingTransaction is highest-fidelity mortgage source
+   * (real ARIVE LOS data); Flueid is secondary public-records fallback.
+   */
+  async getClosedLoans(tenantId, id) {
+    const res = await this.transport.getRaw(
+      `/leads/${id}/closed-loans`,
+      tenantId
+    );
+    return res.closedLoans;
+  }
+  /**
    * Remove tags from a lead by tag name.
    *
    * DELETE /api/v1/leads/:id/tags

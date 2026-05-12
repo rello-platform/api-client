@@ -1,5 +1,53 @@
 # Changelog
 
+## v2.15.0 — 2026-05-12
+
+### Added — `LeadsResource.getClosedLoans` for HHUB Phase 7 ClosingTransaction read path
+
+`LeadsResource.getClosedLoans(tenantId, id)` exposes Rello's
+`GET /api/leads/:id/closed-loans` endpoint (non-v1 route — uses
+`transport.getRaw` with the `/api` prefix). Server filters by
+`status: "CLOSING_COMPLETED"`, orders by `closedAt` desc with
+`actualClosingDate` desc fallback, and returns the Hub-rendered field
+projection. Method returns `ClosedLoan[] | null` — null when no
+closed-loan row exists for the lead.
+
+First consumer: HS Hub data-assembly `fetchMortgageBlock` per HHUB B-04
+amended two-source mortgage lock. ClosingTransaction is the highest-
+fidelity mortgage source (real ARIVE LOS data); Flueid `hh_lien1_*`
+customFields remain the secondary public-records fallback.
+
+#### New export
+
+```ts
+export interface ClosedLoan {
+  id: string;
+  lender: string | null;
+  originalBalance: number | null;
+  currentBalance: number | null;
+  rate: number | null;
+  termMonths: number | null;
+  monthsRemaining: number | null;
+  closedAt: string | null;
+  propertyAddress: string;
+}
+```
+
+`closedAt` falls back to `actualClosingDate` server-side during the
+ARIVE writer dual-populate transition window (Lock S-2). Both are
+ISO-8601 strings.
+
+### Provenance
+
+Closes HHUB Phase 7 ClosingTransaction read path. The Rello endpoint
+`GET /api/leads/:id/closed-loans` was shipped on Rello origin/main
+prior to this release; this version exposes a typed client for spokes.
+HS is the first consumer; future consumers per HHUB B-04 may include
+Milo composition + Oven CTA selector. ARIVE writer extension to
+populate the columns is an out-of-scope follow-up — at release time
+the prod `ClosingTransaction` table has 0 rows total, so this method
+returns null for every existing lead until ARIVE writeback ships.
+
 ## v2.11.0 — 2026-05-08
 
 ### Added — `createPlatformKeyValidator` stale-serve fallback for upstream 5xx resilience

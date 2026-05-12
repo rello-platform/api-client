@@ -300,6 +300,28 @@ interface OfflineInteractionResponse {
         [key: string]: unknown;
     };
 }
+/**
+ * A row from Rello's `ClosingTransaction` model, filtered to
+ * `status: "CLOSING_COMPLETED"` and projected to Hub-rendered fields.
+ *
+ * Source: `GET /api/leads/:id/closed-loans` (Rello endpoint shipped
+ * for HHUB Phase 7 per B-04 amended lock — note `/api/` prefix, not
+ * `/api/v1/` — read via `transport.getRaw`).
+ *
+ * `closedAt` falls back to `actualClosingDate` during the ARIVE writer
+ * dual-populate transition window (Lock S-2). Both are ISO-8601 strings.
+ */
+interface ClosedLoan {
+    id: string;
+    lender: string | null;
+    originalBalance: number | null;
+    currentBalance: number | null;
+    rate: number | null;
+    termMonths: number | null;
+    monthsRemaining: number | null;
+    closedAt: string | null;
+    propertyAddress: string;
+}
 
 declare class LeadsResource {
     private readonly transport;
@@ -370,6 +392,22 @@ declare class LeadsResource {
     applyTags(tenantId: string, id: string, tags: string[]): Promise<void>;
     setCustomFields(tenantId: string, id: string, fields: Record<string, unknown>): Promise<void>;
     getConversionScore(tenantId: string, id: string): Promise<ConversionScore>;
+    /**
+     * Fetch the lead's Rello-platform-closed loans from the
+     * `ClosingTransaction` model.
+     *
+     * GET /api/leads/:id/closed-loans (non-v1 route — uses `getRaw`)
+     *
+     * Server query: `status: "CLOSING_COMPLETED"`, ordered by `closedAt` desc
+     * with `actualClosingDate` desc fallback. Returns null when no closed-loan
+     * row exists for the lead (Hub then falls back to Flueid `hh_lien1_*`
+     * customFields or the "unavailable" empty-state).
+     *
+     * Used by HS Hub data-assembly (`fetchMortgageBlock`) per HHUB B-04
+     * amended lock — ClosingTransaction is highest-fidelity mortgage source
+     * (real ARIVE LOS data); Flueid is secondary public-records fallback.
+     */
+    getClosedLoans(tenantId: string, id: string): Promise<ClosedLoan[] | null>;
     /**
      * Remove tags from a lead by tag name.
      *

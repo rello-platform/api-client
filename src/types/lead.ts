@@ -257,3 +257,26 @@ export interface OfflineInteractionResponse {
     [key: string]: unknown;
   };
 }
+
+/**
+ * A row from Rello's `ClosingTransaction` model, filtered to
+ * `status: "CLOSING_COMPLETED"` and projected to Hub-rendered fields.
+ *
+ * Source: `GET /api/leads/:id/closed-loans` (Rello endpoint shipped
+ * for HHUB Phase 7 per B-04 amended lock — note `/api/` prefix, not
+ * `/api/v1/` — read via `transport.getRaw`).
+ *
+ * `closedAt` falls back to `actualClosingDate` during the ARIVE writer
+ * dual-populate transition window (Lock S-2). Both are ISO-8601 strings.
+ */
+export interface ClosedLoan {
+  id: string;
+  lender: string | null;
+  originalBalance: number | null;
+  currentBalance: number | null;
+  rate: number | null;
+  termMonths: number | null;
+  monthsRemaining: number | null;
+  closedAt: string | null;
+  propertyAddress: string;
+}
