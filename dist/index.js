@@ -1484,6 +1484,12 @@ function getHarvestHomeBaseUrl(fallback = "") {
   return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
 }
 
+// src/get-pathfinder-pro-base-url.ts
+function getPathfinderProBaseUrl(fallback = "") {
+  const raw = (process.env.PATHFINDER_PRO_API_URL || fallback).trim();
+  return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+}
+
 // src/platform-key-validator.ts
 import { createHash } from "crypto";
 function createPlatformKeyValidator(config) {
@@ -1853,6 +1859,7 @@ export {
   createServiceClient,
   getHarvestHomeBaseUrl,
   getMiloBaseUrl,
+  getPathfinderProBaseUrl,
   getRelloBaseUrl,
   parseAgentPayload,
   parseTenantPayload,

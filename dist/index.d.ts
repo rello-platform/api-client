@@ -1540,6 +1540,39 @@ declare function getMiloBaseUrl(fallback?: string): string;
 declare function getHarvestHomeBaseUrl(fallback?: string): string;
 
 /**
+ * Canonical Pathfinder Pro base URL normalizer.
+ *
+ * Strips leading/trailing whitespace, trailing /api or /api/, and trailing
+ * slashes from PATHFINDER_PRO_API_URL so every caller can construct full
+ * paths from the domain root:
+ *   `${getPathfinderProBaseUrl()}/api/intakes/from-spoke`
+ *   `${getPathfinderProBaseUrl()}/api/provisioning/agent`
+ *
+ * Guards against env-var misconfiguration where PATHFINDER_PRO_API_URL
+ * includes /api (e.g. https://pathfinder-pro.app/api), which would
+ * otherwise produce double-prefix URLs like /api/api/intakes/... → 404.
+ *
+ * Mirrors getRelloBaseUrl() / getMiloBaseUrl() / getHarvestHomeBaseUrl()
+ * shape exactly per universal floor § RELLO_API_URL convention. Symmetric
+ * defensive .trim() applied to the (env || fallback) read before regex
+ * stripping, matching the v2.7.0 cross-helper retrofit (operator paste-time
+ * mistakes can hit either env value or fallback; trimming both closes the
+ * class).
+ *
+ * v2.16.0 — introduced for the Home Scout `get-pre-approved` CTA → PFP
+ * cross-app build (Q-NEW-5 lock 2026-05-12). HS outbound caller in
+ * src/lib/pathfinder-pro-client.ts (MAIN-BUILD wave) uses this helper to
+ * construct the receiver URL. Sibling to the new
+ * @rello-platform/pfp-intake-from-spoke payload schema package and the
+ * @rello-platform/permissions::INTAKE_FROM_SPOKE_WRITE slug (v0.30.0).
+ *
+ * @see PA-041 (the audit that consolidated the prior RELLO/MILO normalizers);
+ *      HS ANSWERS.md §16 Q-NEW-5 (cross-app integration architecture lock);
+ *      ~SLUG-AUTH-DRIFT-PREVENTION-README.md §4 (URL convention)
+ */
+declare function getPathfinderProBaseUrl(fallback?: string): string;
+
+/**
  * Configuration for the platform key validator.
  */
 interface PlatformKeyValidatorConfig {
@@ -2067,4 +2100,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getMiloBaseUrl, getRelloBaseUrl, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getMiloBaseUrl, getPathfinderProBaseUrl, getRelloBaseUrl, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };

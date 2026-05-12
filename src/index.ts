@@ -8,6 +8,7 @@ import { ServiceClient, type ServiceClientConfig } from "./service-client.js";
 export { getRelloBaseUrl } from "./get-rello-base-url.js";
 export { getMiloBaseUrl } from "./get-milo-base-url.js";
 export { getHarvestHomeBaseUrl } from "./get-harvest-home-base-url.js";
+export { getPathfinderProBaseUrl } from "./get-pathfinder-pro-base-url.js";
 
 /**
  * Create a typed Rello API client. Reads config from env vars by default:
