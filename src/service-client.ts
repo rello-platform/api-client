@@ -14,6 +14,10 @@ import type {
   AddressNormalizeRequest,
   AddressNormalizeResponse,
 } from "./types/address-normalize.js";
+import type {
+  PropertyAutofillRequest,
+  PropertyAutofillResponse,
+} from "./types/property-autofill.js";
 
 export interface ServiceClientConfig {
   /** Base URL of the target service (e.g., process.env.NEWSLETTER_STUDIO_URL). */
@@ -91,6 +95,32 @@ export class ServiceClient {
   ): Promise<AddressNormalizeResponse> {
     return this.post<AddressNormalizeResponse>(
       "/api/address-normalize",
+      input,
+      tenantId,
+    );
+  }
+
+  /**
+   * SPEC-PE-PFP-PROPERTY-AUTOFILL — unified address-normalize + MLS lookup +
+   * (optional) ATTOM enrichment with caller-declared selected-fields cache.
+   *
+   * Only meaningful when this `ServiceClient` is bound to Property Engine
+   * (e.g. via `rello.service("property-engine")`). Other targets will 404.
+   *
+   * `tenantId` is REQUIRED — Property Engine returns 400 if the
+   * `X-Tenant-Id` header is absent. Property data (parcel + listing + ATTOM)
+   * is platform-shared / external-keyed; `tenantId` is for the audit trail
+   * dimension and to pass the receiver's auth gate (lookups:read permission).
+   *
+   * TRID guardrail per Design Call #2: response describes borrower's
+   * CURRENT RESIDENCE only — never implies subject-property speculation.
+   */
+  async propertyAutofill(
+    input: PropertyAutofillRequest,
+    tenantId: string,
+  ): Promise<PropertyAutofillResponse> {
+    return this.post<PropertyAutofillResponse>(
+      "/api/property-autofill",
       input,
       tenantId,
     );

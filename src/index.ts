@@ -144,7 +144,21 @@ export type {
   AddressNormalizeRequest,
   AddressNormalizeMatchedBy,
   AddressNormalizeResponse,
+  PropertyAutofillFreeFormInput,
+  PropertyAutofillPreSplitInput,
+  PropertyAutofillRequest,
+  PropertyAutofillFieldKey,
+  PropertyAutofillPropertyStatus,
+  PropertyAutofillPropertyType,
+  PropertyAutofillListing,
+  PropertyAutofillFieldShape,
+  PropertyAutofillAttomSummary,
+  PropertyAutofillResponseSuccess,
+  PropertyAutofillResponseError,
+  PropertyAutofillResponse,
 } from "./types/index.js";
+
+export { PROPERTY_AUTOFILL_FIELD_KEYS } from "./types/index.js";
 
 // Provisioning schemas + runtime validators
 export {

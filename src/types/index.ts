@@ -127,6 +127,23 @@ export type {
   AddressNormalizeResponse,
 } from "./address-normalize.js";
 
+export type {
+  PropertyAutofillFreeFormInput,
+  PropertyAutofillPreSplitInput,
+  PropertyAutofillRequest,
+  PropertyAutofillFieldKey,
+  PropertyAutofillPropertyStatus,
+  PropertyAutofillPropertyType,
+  PropertyAutofillListing,
+  PropertyAutofillFieldShape,
+  PropertyAutofillAttomSummary,
+  PropertyAutofillResponseSuccess,
+  PropertyAutofillResponseError,
+  PropertyAutofillResponse,
+} from "./property-autofill.js";
+
+export { PROPERTY_AUTOFILL_FIELD_KEYS } from "./property-autofill.js";
+
 export {
   provisionedAgentSchema,
   tenantEnablePayloadSchema,

@@ -978,6 +978,28 @@ var ServiceClient = class {
       tenantId
     );
   }
+  /**
+   * SPEC-PE-PFP-PROPERTY-AUTOFILL — unified address-normalize + MLS lookup +
+   * (optional) ATTOM enrichment with caller-declared selected-fields cache.
+   *
+   * Only meaningful when this `ServiceClient` is bound to Property Engine
+   * (e.g. via `rello.service("property-engine")`). Other targets will 404.
+   *
+   * `tenantId` is REQUIRED — Property Engine returns 400 if the
+   * `X-Tenant-Id` header is absent. Property data (parcel + listing + ATTOM)
+   * is platform-shared / external-keyed; `tenantId` is for the audit trail
+   * dimension and to pass the receiver's auth gate (lookups:read permission).
+   *
+   * TRID guardrail per Design Call #2: response describes borrower's
+   * CURRENT RESIDENCE only — never implies subject-property speculation.
+   */
+  async propertyAutofill(input, tenantId) {
+    return this.post(
+      "/api/property-autofill",
+      input,
+      tenantId
+    );
+  }
   async request(method, path, body, tenantId) {
     const requestId = randomUUID2();
     const url = `${this.baseUrl}${path}`;
@@ -1729,6 +1751,19 @@ function safePath(request) {
   }
 }
 
+// src/types/property-autofill.ts
+var PROPERTY_AUTOFILL_FIELD_KEYS = [
+  "beds",
+  "baths",
+  "sqft",
+  "yearBuilt",
+  "lotSizeSqft",
+  "propertyType",
+  "estimatedValue",
+  "lastSaleDate",
+  "lastSalePrice"
+];
+
 // src/types/provisioning.ts
 import { z } from "zod";
 var provisionedAgentSchema = z.object({
@@ -1861,6 +1896,7 @@ function createServiceClient(config) {
 export {
   AdminResource,
   AuthResource,
+  PROPERTY_AUTOFILL_FIELD_KEYS,
   RelloAuthError,
   RelloClient,
   RelloError,

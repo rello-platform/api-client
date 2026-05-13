@@ -869,6 +869,150 @@ interface AddressNormalizeResponse {
     };
 }
 
+/**
+ * SPEC-PE-PFP-PROPERTY-AUTOFILL — typed contract for the
+ * `POST /api/property-autofill` endpoint hosted by Property Engine.
+ *
+ * Consumers reach this surface via:
+ *
+ *   const pe = await rello.service("property-engine");
+ *   const out = await pe.propertyAutofill(
+ *     { rawAddress: "123 Main St, Anytown, UT 84101", selectedFields: ["beds", "baths"] },
+ *     tenantId,
+ *   );
+ *
+ * Spec body lives in iCloud:
+ *   `RELLO TO BE BUILT/APP REBUILDS/PROPERTY ENGINE/SPEC-PE-PFP-PROPERTY-AUTOFILL.md`
+ *
+ * Unified composer endpoint that wraps:
+ *   1. Address normalize + Parcel natural-key resolution
+ *   2. MLS listing lookup via Property.parcelId (with address-fallback)
+ *   3. (Optional) ATTOM enrichment passthrough
+ *
+ * Eliminates 2-3 sequential round-trips for cross-app callers (PFP Cockpit
+ * Section 2, future spokes).
+ *
+ * TRID guardrail (Design Call #2 lock 2026-05-13):
+ * Response describes the borrower's CURRENT RESIDENCE only — never implies
+ * subject-property speculation. Consumers MUST NOT wire this to subject-
+ * property intake. PFP's TRID stance is that subject-property addresses are
+ * never captured pre-LOS-export (`subjectTBDIndicator: true`).
+ *
+ * Design locks (Build-KA disposition 2026-05-13):
+ *   #1 — Unified endpoint is the locked path (§3.4 PFP-side composer REJECTED)
+ *   #2 — TRID = current-residence-only
+ *   #3 — Selected-fields cache: key (parcelId, sortedFieldKeys, includeAttom);
+ *        sortedFieldKeys at cache-write time; 24h MLS / 7d ATTOM TTLs
+ *   #4 — api-client extension (this file) ships in v2.18.0
+ *
+ * `tenantId` is REQUIRED — Property Engine returns 400 if the `X-Tenant-Id`
+ * header is absent. Property data (Parcel + MLS listing + ATTOM) is
+ * platform-shared / external-keyed; `tenantId` exists for the audit trail
+ * dimension and to pass the receiver's auth gate (`lookups:read` permission).
+ */
+/**
+ * Verbatim from PE `src/app/api/property-autofill/route.ts` lines 63-73.
+ * Cache key at PE includes `sortedFieldKeys` per SPEC §3.2 Design Call #3.
+ */
+declare const PROPERTY_AUTOFILL_FIELD_KEYS: readonly ["beds", "baths", "sqft", "yearBuilt", "lotSizeSqft", "propertyType", "estimatedValue", "lastSaleDate", "lastSalePrice"];
+type PropertyAutofillFieldKey = (typeof PROPERTY_AUTOFILL_FIELD_KEYS)[number];
+/**
+ * Mirrors Prisma enum `PropertyStatus` at PE `prisma/schema.prisma:1059-1067`.
+ * Inlined as a string-literal union to avoid an `@prisma/client` dependency
+ * in the api-client package.
+ */
+type PropertyAutofillPropertyStatus = "ACTIVE" | "PENDING" | "SOLD" | "WITHDRAWN" | "EXPIRED" | "COMING_SOON" | "OFF_MARKET";
+/**
+ * Mirrors Prisma enum `PropertyType` at PE `prisma/schema.prisma:1075-1084`.
+ * Inlined as a string-literal union to avoid an `@prisma/client` dependency
+ * in the api-client package.
+ */
+type PropertyAutofillPropertyType = "SINGLE_FAMILY" | "CONDO" | "TOWNHOUSE" | "MULTI_FAMILY" | "LAND" | "COMMERCIAL" | "MOBILE_HOME" | "OTHER";
+/** Free-form input variant — comma-separated address string. */
+interface PropertyAutofillFreeFormInput {
+    rawAddress: string;
+    /** Optional state override when rawAddress lacks one. */
+    state?: string | null;
+    includeMls?: boolean;
+    includeAttom?: boolean;
+    /** Caller-declared field whitelist; cache key includes sortedFieldKeys per SPEC §3.2 Design Call #3. */
+    selectedFields?: PropertyAutofillFieldKey[];
+}
+/** Pre-split input variant — caller already has structured fields. */
+interface PropertyAutofillPreSplitInput {
+    streetAddress: string;
+    city: string;
+    state: string;
+    zipCode: string;
+    unit?: string | null;
+    county?: string | null;
+    apn?: string | null;
+    includeMls?: boolean;
+    includeAttom?: boolean;
+    selectedFields?: PropertyAutofillFieldKey[];
+}
+type PropertyAutofillRequest = PropertyAutofillFreeFormInput | PropertyAutofillPreSplitInput;
+interface PropertyAutofillListing {
+    listingId: string;
+    mlsNumber: string | null;
+    status: PropertyAutofillPropertyStatus;
+    listPrice: number | null;
+    listDate: string | null;
+    matchedBy: "parcel-id" | "address-fallback" | "none";
+}
+interface PropertyAutofillFieldShape {
+    beds?: number | null;
+    baths?: number | null;
+    sqft?: number | null;
+    yearBuilt?: number | null;
+    lotSizeSqft?: number | null;
+    propertyType?: PropertyAutofillPropertyType | null;
+    estimatedValue?: number | null;
+    lastSaleDate?: string | null;
+    lastSalePrice?: number | null;
+}
+interface PropertyAutofillAttomSummary {
+    attomId: number | null;
+    yearBuilt: number | null;
+    lotSizeSqft: number | null;
+    buildingSqFt: number | null;
+    estimatedValue: number | null;
+    lastSaleDate: string | null;
+    lastSalePrice: number | null;
+}
+interface PropertyAutofillResponseSuccess {
+    success: true;
+    canonicalAddress: string;
+    normalizedComponents: {
+        streetAddress: string;
+        city: string;
+        state: string;
+        zipCode: string;
+        unit: string | null;
+        county: string | null;
+        apn: string | null;
+    };
+    parcelResolution: {
+        parcelId: string | null;
+        fips: string | null;
+        matchedBy: "apn-county" | "address-fallback" | "none";
+    };
+    listing: PropertyAutofillListing | null;
+    propertyDetails: PropertyAutofillFieldShape | null;
+    attom: PropertyAutofillAttomSummary | null;
+    cache: {
+        hit: boolean;
+        key: string | null;
+    };
+}
+interface PropertyAutofillResponseError {
+    success: false;
+    error: string;
+    code: "BAD_JSON" | "VALIDATION_ERROR" | "UNPARSEABLE_ADDRESS" | "NORMALIZE_FAILED" | "MLS_LOOKUP_FAILED" | "ATTOM_LOOKUP_FAILED";
+    details?: unknown;
+}
+type PropertyAutofillResponse = PropertyAutofillResponseSuccess | PropertyAutofillResponseError;
+
 interface ServiceClientConfig {
     /** Base URL of the target service (e.g., process.env.NEWSLETTER_STUDIO_URL). */
     baseUrl: string;
@@ -910,6 +1054,22 @@ declare class ServiceClient {
      * trail dimension and to pass the receiver's auth gate.
      */
     addressNormalize(input: AddressNormalizeRequest, tenantId: string): Promise<AddressNormalizeResponse>;
+    /**
+     * SPEC-PE-PFP-PROPERTY-AUTOFILL — unified address-normalize + MLS lookup +
+     * (optional) ATTOM enrichment with caller-declared selected-fields cache.
+     *
+     * Only meaningful when this `ServiceClient` is bound to Property Engine
+     * (e.g. via `rello.service("property-engine")`). Other targets will 404.
+     *
+     * `tenantId` is REQUIRED — Property Engine returns 400 if the
+     * `X-Tenant-Id` header is absent. Property data (parcel + listing + ATTOM)
+     * is platform-shared / external-keyed; `tenantId` is for the audit trail
+     * dimension and to pass the receiver's auth gate (lookups:read permission).
+     *
+     * TRID guardrail per Design Call #2: response describes borrower's
+     * CURRENT RESIDENCE only — never implies subject-property speculation.
+     */
+    propertyAutofill(input: PropertyAutofillRequest, tenantId: string): Promise<PropertyAutofillResponse>;
     private request;
 }
 
@@ -2186,4 +2346,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type PlatformCaller, type PlatformKeyValidatorConfig, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getMiloBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getMiloBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };

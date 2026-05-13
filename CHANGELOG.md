@@ -1,5 +1,67 @@
 # Changelog
 
+## v2.18.0 — 2026-05-13
+
+### Added — `ServiceClient.propertyAutofill()` for SPEC-PE-PFP-PROPERTY-AUTOFILL
+
+Adds one method on `ServiceClient` mirroring the existing `addressNormalize`
+precedent verbatim. Un-gates PFP-side consumption of
+`POST /api/property-autofill` (PE Phase 1 shipped at PE SHA `b2b8e0b`
+2026-05-13).
+
+#### New method
+
+```ts
+async propertyAutofill(
+  input: PropertyAutofillRequest,
+  tenantId: string,
+): Promise<PropertyAutofillResponse>
+```
+
+Unified composer endpoint that wraps address-normalize + Parcel resolution +
+MLS listing lookup + (optional) ATTOM enrichment behind one call. Eliminates
+2-3 sequential round-trips for cross-app callers (PFP Cockpit Section 2,
+future spokes).
+
+`tenantId` is REQUIRED — Property Engine returns 400 if the `X-Tenant-Id`
+header is absent. Property data (Parcel + listing + ATTOM) is platform-shared
+/ external-keyed; `tenantId` exists for the audit trail dimension and to pass
+the receiver's auth gate (`lookups:read` permission).
+
+#### New type exports
+
+- `PROPERTY_AUTOFILL_FIELD_KEYS` const array (9 caller-declarable fields)
+- `PropertyAutofillFieldKey` union
+- `PropertyAutofillFreeFormInput` / `PropertyAutofillPreSplitInput` /
+  `PropertyAutofillRequest`
+- `PropertyAutofillPropertyStatus` / `PropertyAutofillPropertyType` (Prisma
+  enum mirrors — inlined as string-literal unions; no `@prisma/client`
+  dependency)
+- `PropertyAutofillListing` / `PropertyAutofillFieldShape` /
+  `PropertyAutofillAttomSummary`
+- `PropertyAutofillResponseSuccess` / `PropertyAutofillResponseError` /
+  `PropertyAutofillResponse`
+
+Type contract sourced verbatim from PE
+`src/app/api/property-autofill/route.ts` at SHA `b2b8e0b` lines 63-187.
+Prisma enum mirrors source from PE `prisma/schema.prisma:1059-1084`.
+
+#### TRID guardrail (Design Call #2 lock)
+
+Response describes the borrower's CURRENT RESIDENCE only — never implies
+subject-property speculation. Consumers MUST NOT wire this to subject-
+property intake. PFP's TRID stance is that subject-property addresses are
+never captured pre-LOS-export.
+
+### Provenance
+
+SPEC-PE-PFP-PROPERTY-AUTOFILL Design Call #4 LOCKED. T4-PE Phase 1
+close-report (2026-05-13) deferred 200 happy-path smoke to Phase 2;
+this release un-gates PFP-side consumer-pin work.
+
+Consumer pin bumps (PFP / Scout / Drumbeat / MarketIntel / Rello) fan out
+as separate per-consumer dispatches per `feedback-shared-file-wave-build-gate`.
+
 ## v2.15.0 — 2026-05-12
 
 ### Added — `LeadsResource.getClosedLoans` for HHUB Phase 7 ClosingTransaction read path
