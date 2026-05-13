@@ -1490,6 +1490,25 @@ function getPathfinderProBaseUrl(fallback = "") {
   return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
 }
 
+// src/get-property-engine-base-url.ts
+function getPropertyEngineBaseUrl(fallback = "") {
+  const raw = (process.env.PROPERTY_ENGINE_API_URL || fallback).trim();
+  return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+}
+
+// src/get-property-engine-headers.ts
+function getPropertyEngineHeaders(apiKey) {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json"
+  };
+}
+
+// src/has-property-engine-credentials.ts
+function hasPropertyEngineCredentials(apiKey) {
+  return typeof apiKey === "string" && apiKey.length > 0;
+}
+
 // src/platform-key-validator.ts
 import { createHash } from "crypto";
 function createPlatformKeyValidator(config) {
@@ -1860,7 +1879,10 @@ export {
   getHarvestHomeBaseUrl,
   getMiloBaseUrl,
   getPathfinderProBaseUrl,
+  getPropertyEngineBaseUrl,
+  getPropertyEngineHeaders,
   getRelloBaseUrl,
+  hasPropertyEngineCredentials,
   parseAgentPayload,
   parseTenantPayload,
   provisionedAgentSchema,

@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getRelloBaseUrl, getMiloBaseUrl, getHarvestHomeBaseUrl } from "../dist/index.js";
+import {
+  getRelloBaseUrl,
+  getMiloBaseUrl,
+  getHarvestHomeBaseUrl,
+  getPropertyEngineBaseUrl,
+} from "../dist/index.js";
 
 // Helper to swap env around a test without leaking state.
 function withEnv(key, value, fn) {
@@ -358,6 +363,116 @@ test("helpers are independent: setting MILO_API_URL does not affect getHarvestHo
   withEnv("MILO_API_URL", "https://milo-engine-production.up.railway.app", () => {
     withEnv("HH_INTAKE_URL", undefined, () => {
       assert.equal(getHarvestHomeBaseUrl(), "");
+    });
+  });
+});
+
+// --- getPropertyEngineBaseUrl ---
+
+test("getPropertyEngineBaseUrl: canonical domain-root env passes through unchanged", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: legacy /api-suffixed env strips /api", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app/api", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: legacy /api/-suffixed env strips /api/", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app/api/", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: trailing-slash-only env strips slash", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app/", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: multiple trailing slashes all stripped", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app///", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: missing env with no fallback returns empty string", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", undefined, () => {
+    assert.equal(getPropertyEngineBaseUrl(), "");
+  });
+});
+
+test("getPropertyEngineBaseUrl: missing env uses fallback when provided", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", undefined, () => {
+    assert.equal(
+      getPropertyEngineBaseUrl("https://property-engine.app"),
+      "https://property-engine.app"
+    );
+  });
+});
+
+test("getPropertyEngineBaseUrl: fallback also gets /api stripped", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", undefined, () => {
+    assert.equal(
+      getPropertyEngineBaseUrl("https://property-engine.app/api"),
+      "https://property-engine.app"
+    );
+  });
+});
+
+test("getPropertyEngineBaseUrl: env-set value overrides fallback", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://prod.property-engine.app", () => {
+    assert.equal(
+      getPropertyEngineBaseUrl("https://staging.property-engine.app"),
+      "https://prod.property-engine.app"
+    );
+  });
+});
+
+test("getPropertyEngineBaseUrl: leading whitespace in env value is trimmed", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "  https://property-engine.app", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: trailing whitespace in env value is trimmed", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app  ", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: whitespace after trailing /api gets stripped (trim before regex)", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app/api  ", () => {
+    assert.equal(getPropertyEngineBaseUrl(), "https://property-engine.app");
+  });
+});
+
+test("getPropertyEngineBaseUrl: leading whitespace in fallback (env unset) is trimmed", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", undefined, () => {
+    assert.equal(
+      getPropertyEngineBaseUrl("  https://property-engine.app"),
+      "https://property-engine.app"
+    );
+  });
+});
+
+// --- Independence: PE helper isolated from other env vars ---
+
+test("helpers are independent: setting RELLO_API_URL does not affect getPropertyEngineBaseUrl", () => {
+  withEnv("RELLO_API_URL", "https://hellorello.app", () => {
+    withEnv("PROPERTY_ENGINE_API_URL", undefined, () => {
+      assert.equal(getPropertyEngineBaseUrl(), "");
+    });
+  });
+});
+
+test("helpers are independent: setting PROPERTY_ENGINE_API_URL does not affect getMiloBaseUrl", () => {
+  withEnv("PROPERTY_ENGINE_API_URL", "https://property-engine.app", () => {
+    withEnv("MILO_API_URL", undefined, () => {
+      assert.equal(getMiloBaseUrl(), "");
     });
   });
 });
