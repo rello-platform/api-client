@@ -1512,6 +1512,12 @@ function getPathfinderProBaseUrl(fallback = "") {
   return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
 }
 
+// src/get-oven-base-url.ts
+function getOvenBaseUrl(fallback = "") {
+  const raw = (process.env.THE_OVEN_API_URL || fallback).trim();
+  return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+}
+
 // src/get-property-engine-base-url.ts
 function getPropertyEngineBaseUrl(fallback = "") {
   const raw = (process.env.PROPERTY_ENGINE_API_URL || fallback).trim();
@@ -1914,6 +1920,7 @@ export {
   createServiceClient,
   getHarvestHomeBaseUrl,
   getMiloBaseUrl,
+  getOvenBaseUrl,
   getPathfinderProBaseUrl,
   getPropertyEngineBaseUrl,
   getPropertyEngineHeaders,
