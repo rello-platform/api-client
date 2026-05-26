@@ -1000,6 +1000,29 @@ interface PropertyAutofillResponseSuccess {
     listing: PropertyAutofillListing | null;
     propertyDetails: PropertyAutofillFieldShape | null;
     attom: PropertyAutofillAttomSummary | null;
+    /**
+     * Annual property tax (USD/year) for the borrower's CURRENT RESIDENCE,
+     * resolved by address against Property Engine's statewide Utah SGID dataset
+     * (DISPATCH-T3C / B-04; PE ships in this contract from v2.21.0). READ from the
+     * persisted `Property.annualTax` (computed by PE's `annual-tax-compute` cron) —
+     * never recomputed at request time.
+     *
+     * `null` when no SGID row matches the address OR the parcel is tax-exempt.
+     * Consumers omit the tax line when null — a missing tax row is never an error.
+     *
+     * Resolved independently of `listing` / `propertyDetails` / `attom` and is
+     * NOT gated by `selectedFields` (tax is not an MLS-derived selectable field).
+     * Optional in the type so consumers pinned ahead of the PE deploy still
+     * typecheck; PE always emits these keys once deployed.
+     *
+     * TRID note: this remains a CURRENT-RESIDENCE field — the tax of where the
+     * borrower lives now. It MUST NOT be wired to subject-property intake.
+     */
+    taxAnnual?: number | null;
+    /** Assessment / tax year for the matched SGID tax row; null when unmatched. */
+    taxYear?: number | null;
+    /** Assessed market value (USD) for the matched SGID tax row; null when unmatched. */
+    taxAssessedValue?: number | null;
     cache: {
         hit: boolean;
         key: string | null;
