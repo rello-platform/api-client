@@ -138,3 +138,144 @@ test("LeadsResource.listWithPagination(): legacy un-enveloped { leads, total } s
     assert.equal(page.total, 7, "legacy top-level .total must still be read via fallback");
   });
 });
+
+// ── CREATE / UPDATE / GET single-lead ok() envelope unwrap (v2.22.0) ──
+// Rello migrated the whole /api/leads* CRUD cluster to ok()/fail():
+//   POST  /api/leads      → ok<LeadCreateResponse>({ lead, duplicates? }, {status:201}) → lead at data.lead
+//   GET   /api/leads/[id] → ok<LeadDetailGetResponse>(lead, { meta })                   → lead at data
+//   PATCH /api/leads/[id] → ok<LeadDetailUpdateResponse>(lead)                          → lead at data
+// `unwrapLead` must peel both the envelope AND the optional { lead } nesting,
+// while still handling legacy un-enveloped shapes.
+
+function okEnvelope(data, meta) {
+  return { success: true, data, ...(meta ? { meta } : {}) };
+}
+
+test("LeadsResource.create(): unwraps lead from ok({ lead, duplicates }) envelope", async () => {
+  const body = okEnvelope({ lead: FIXTURE_LEAD, duplicates: [{ id: "dup_1" }], warning: "Potential duplicate leads found" });
+  await withClient(async () => jsonResponse(body), async (client) => {
+    const result = await client.leads.create("tenant_test", { email: FIXTURE_LEAD.email, firstName: "Test" });
+    assert.equal(result.id, FIXTURE_LEAD.id, "create must return data.lead.id, not the envelope");
+    assert.equal("success" in result, false, "envelope must be fully unwrapped");
+    assert.equal("lead" in result, false, "the { lead } nesting must be peeled");
+    assert.equal("duplicates" in result, false, "duplicates must not leak onto the Lead");
+  });
+});
+
+test("LeadsResource.create(): legacy un-enveloped { lead } still unwraps", async () => {
+  await withClient(async () => jsonResponse({ lead: FIXTURE_LEAD }), async (client) => {
+    const result = await client.leads.create("tenant_test", { email: FIXTURE_LEAD.email });
+    assert.equal(result.id, FIXTURE_LEAD.id);
+    assert.equal("lead" in result, false);
+  });
+});
+
+test("LeadsResource.create(): legacy bare-lead response still passes through", async () => {
+  await withClient(async () => jsonResponse(FIXTURE_LEAD), async (client) => {
+    const result = await client.leads.create("tenant_test", { email: FIXTURE_LEAD.email });
+    assert.equal(result.id, FIXTURE_LEAD.id);
+  });
+});
+
+test("LeadsResource.get(): unwraps lead from canonical ok(lead, { meta }) bare-lead envelope", async () => {
+  const body = okEnvelope(FIXTURE_LEAD, { miloStatus: { healthy: true } });
+  await withClient(async () => jsonResponse(body), async (client) => {
+    const result = await client.leads.get("tenant_test", "lead_test_123");
+    assert.equal(result.id, FIXTURE_LEAD.id, "get must return envelope.data (the bare lead)");
+    assert.equal("success" in result, false, "envelope must be unwrapped");
+    assert.equal("data" in result, false);
+  });
+});
+
+test("LeadsResource.update(): unwraps lead from canonical ok(lead) bare-lead envelope", async () => {
+  await withClient(async () => jsonResponse(okEnvelope(FIXTURE_LEAD)), async (client) => {
+    const result = await client.leads.update("tenant_test", "lead_test_123", { firstName: "Renamed" });
+    assert.equal(result.id, FIXTURE_LEAD.id, "update must return envelope.data");
+    assert.equal("success" in result, false);
+  });
+});
+
+test("LeadsResource.update(): legacy { lead } envelope still unwraps", async () => {
+  await withClient(async () => jsonResponse({ lead: FIXTURE_LEAD }), async (client) => {
+    const result = await client.leads.update("tenant_test", "lead_test_123", { firstName: "X" });
+    assert.equal(result.id, FIXTURE_LEAD.id);
+    assert.equal("lead" in result, false);
+  });
+});
+
+// ── Audited consumer methods: ok() envelope unwrap (v2.22.0) ──
+
+test("LeadsResource.getConversionScore(): unwraps ok({ score }) to the bare payload", async () => {
+  const score = { score: 0.72, factors: { recency: 0.4 }, updatedAt: "2026-05-26T00:00:00Z" };
+  await withClient(async () => jsonResponse(okEnvelope({ score })), async (client) => {
+    const result = await client.leads.getConversionScore("tenant_test", "lead_test_123");
+    assert.equal("success" in result, false, "must return envelope.data, not the envelope");
+    assert.deepEqual(result.score, score, "data.score must survive the unwrap intact");
+  });
+});
+
+test("LeadsResource.getClosedLoans(): unwraps ok({ closedLoans }) array", async () => {
+  const closedLoans = [{ id: "ct_1", lender: "Acme", propertyAddress: "1 Main St" }];
+  await withClient(async () => jsonResponse(okEnvelope({ closedLoans })), async (client) => {
+    const result = await client.leads.getClosedLoans("tenant_test", "lead_test_123");
+    assert.equal(Array.isArray(result), true, "must read closedLoans out of envelope.data");
+    assert.equal(result[0].id, "ct_1");
+  });
+});
+
+test("LeadsResource.getClosedLoans(): ok({ closedLoans: null }) → null", async () => {
+  await withClient(async () => jsonResponse(okEnvelope({ closedLoans: null })), async (client) => {
+    const result = await client.leads.getClosedLoans("tenant_test", "lead_test_123");
+    assert.equal(result, null);
+  });
+});
+
+test("LeadsResource.getClosedLoans(): legacy un-enveloped { closedLoans } still parses", async () => {
+  await withClient(async () => jsonResponse({ closedLoans: [{ id: "ct_legacy", propertyAddress: "9 Old Rd" }] }), async (client) => {
+    const result = await client.leads.getClosedLoans("tenant_test", "lead_test_123");
+    assert.equal(result[0].id, "ct_legacy");
+  });
+});
+
+test("LeadsResource.getNurtureDecisions(): reads decisions array from envelope.data", async () => {
+  const decisions = [{ framework: "ENGAGE", contentDirection: "warm", contentPhase: "early" }];
+  await withClient(async () => jsonResponse(okEnvelope(decisions, { total: 1 })), async (client) => {
+    const result = await client.leads.getNurtureDecisions("tenant_test", "lead_test_123");
+    assert.equal(Array.isArray(result), true);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].framework, "ENGAGE");
+  });
+});
+
+test("LeadsResource.getNurtureDecisions(): legacy { decisions } shape still parses", async () => {
+  await withClient(async () => jsonResponse({ decisions: [{ framework: "LEGACY", contentDirection: null, contentPhase: null }] }), async (client) => {
+    const result = await client.leads.getNurtureDecisions("tenant_test", "lead_test_123");
+    assert.equal(result[0].framework, "LEGACY");
+  });
+});
+
+test("LeadsResource.findByTags(): builds { leads, total } from ok(leads, { meta: { total } })", async () => {
+  await withClient(async () => jsonResponse(okEnvelope([FIXTURE_LEAD, FIXTURE_LEAD_2], { total: 42 })), async (client) => {
+    const result = await client.leads.findByTags("tenant_test", { tagSlugs: ["hot"], operator: "AND" });
+    assert.equal(result.leads.length, 2, "leads must come from envelope.data");
+    assert.equal(result.total, 42, "total must come from envelope.meta.total");
+  });
+});
+
+test("LeadsResource.findByTags(): legacy un-enveloped { leads, total } still parses", async () => {
+  await withClient(async () => jsonResponse({ leads: [FIXTURE_LEAD], total: 1 }), async (client) => {
+    const result = await client.leads.findByTags("tenant_test", { tagSlugs: ["x"], operator: "OR" });
+    assert.equal(result.leads.length, 1);
+    assert.equal(result.total, 1);
+  });
+});
+
+test("LeadsResource.getContextCache(): unwraps ok({ exists, ... }) to the bare payload", async () => {
+  const cache = { exists: true, leadId: "lead_test_123", narrative: "story", sourcesPresent: 3, sourcesTotal: 5 };
+  await withClient(async () => jsonResponse(okEnvelope(cache)), async (client) => {
+    const result = await client.leads.getContextCache("tenant_test", "lead_test_123");
+    assert.equal("success" in result, false, "must return envelope.data");
+    assert.equal(result.exists, true);
+    assert.equal(result.narrative, "story");
+  });
+});

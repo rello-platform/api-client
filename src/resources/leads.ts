@@ -17,33 +17,53 @@ import type {
   ClosedLoan,
 } from "../types/lead.js";
 
+/**
+ * Unwraps Rello's canonical `ok()` envelope `{ success, data, meta }` to the
+ * bare `data` payload. Falls back to the raw response for legacy un-enveloped
+ * Rello deployments (and for routes not yet migrated to the envelope).
+ *
+ * The transport (`transport.ts`) returns `res.json()` directly with NO central
+ * envelope unwrap, so each enveloped resource method must unwrap itself. Do NOT
+ * move this into `transport.request` — some methods (e.g. `getBatchTags`) read
+ * `res.data` from a route whose own payload is `{ data }`, and a transport-level
+ * unwrap would double-unwrap them.
+ */
+function unwrapData<T>(res: unknown): T {
+  return res && typeof res === "object" && "success" in res && "data" in res
+    ? (res as { data: T }).data
+    : (res as T);
+}
+
+/**
+ * Unwraps a `Lead` from Rello's `ok()` envelope. After unwrapping the envelope,
+ * `data` may be the lead directly (`GET`/`PATCH /leads/[id]` → `ok(lead)`) or
+ * `{ lead, ... }` (`POST /leads` → `ok<LeadCreateResponse>({ lead, duplicates? })`).
+ * Falls back to legacy un-enveloped `{ lead }` / bare-lead shapes for old Rello
+ * deployments.
+ */
+function unwrapLead(res: unknown): Lead {
+  const payload = unwrapData<unknown>(res);
+  return payload && typeof payload === "object" && "lead" in payload
+    ? (payload as { lead: Lead }).lead
+    : (payload as Lead);
+}
+
 export class LeadsResource {
   constructor(private readonly transport: Transport) {}
 
   async create(tenantId: string, data: CreateLeadInput): Promise<Lead> {
-    const res = await this.transport.post<{ lead: Lead } | Lead>(
-      "/leads",
-      tenantId,
-      data
-    );
-    return "lead" in res ? res.lead : res;
+    const res = await this.transport.post<unknown>("/leads", tenantId, data);
+    return unwrapLead(res);
   }
 
   async get(tenantId: string, id: string): Promise<Lead> {
-    const res = await this.transport.get<{ lead: Lead } | Lead>(
-      `/leads/${id}`,
-      tenantId
-    );
-    return "lead" in res ? res.lead : res;
+    const res = await this.transport.get<unknown>(`/leads/${id}`, tenantId);
+    return unwrapLead(res);
   }
 
   async update(tenantId: string, id: string, data: UpdateLeadInput): Promise<Lead> {
-    const res = await this.transport.patch<{ lead: Lead } | Lead>(
-      `/leads/${id}`,
-      tenantId,
-      data
-    );
-    return "lead" in res ? res.lead : res;
+    const res = await this.transport.patch<unknown>(`/leads/${id}`, tenantId, data);
+    return unwrapLead(res);
   }
 
   /**
@@ -259,10 +279,14 @@ export class LeadsResource {
   }
 
   async getConversionScore(tenantId: string, id: string): Promise<ConversionScore> {
-    return this.transport.get<ConversionScore>(
+    // Rello returns `ok<LeadConversionScoreResponse>({ score })` — unwrap the
+    // envelope to the bare payload. Legacy un-enveloped deployments returned the
+    // payload directly, which `unwrapData` passes through unchanged.
+    const res = await this.transport.get<unknown>(
       `/leads/${id}/conversion-score`,
       tenantId
     );
+    return unwrapData<ConversionScore>(res);
   }
 
   /**
@@ -281,11 +305,16 @@ export class LeadsResource {
    * (real ARIVE LOS data); Flueid is secondary public-records fallback.
    */
   async getClosedLoans(tenantId: string, id: string): Promise<ClosedLoan[] | null> {
-    const res = await this.transport.getRaw<{ closedLoans: ClosedLoan[] | null }>(
+    // Rello returns `ok<ClosedLoansResponse>({ closedLoans })` via the `/api`
+    // (non-v1) route — unwrap the envelope, then read `closedLoans`. Legacy
+    // un-enveloped deployments returned `{ closedLoans }` at the top level,
+    // which `unwrapData` passes through unchanged.
+    const res = await this.transport.getRaw<unknown>(
       `/leads/${id}/closed-loans`,
       tenantId
     );
-    return res.closedLoans;
+    const payload = unwrapData<{ closedLoans?: ClosedLoan[] | null }>(res);
+    return payload?.closedLoans ?? null;
   }
 
   /**
@@ -322,11 +351,16 @@ export class LeadsResource {
     if (params.limit !== undefined) query.limit = String(params.limit);
     if (params.action) query.action = params.action;
 
-    const res = await this.transport.get<{
-      decisions: NurtureDecision[];
-      pagination?: unknown;
-    }>(`/leads/${id}/nurture-decisions`, tenantId, query);
-    return res.decisions;
+    // Rello returns `ok<NurtureDecisionsResponse>(decisions, { meta })` where
+    // the decisions array is the envelope `data`. Legacy un-enveloped
+    // deployments returned `{ decisions }` at the top level — handle both.
+    const res = await this.transport.get<unknown>(
+      `/leads/${id}/nurture-decisions`,
+      tenantId,
+      query
+    );
+    const payload = unwrapData<NurtureDecision[] | { decisions?: NurtureDecision[] }>(res);
+    return Array.isArray(payload) ? payload : (payload?.decisions ?? []);
   }
 
   /**
@@ -337,11 +371,21 @@ export class LeadsResource {
    * Used for audience segmentation in Newsletter Studio's smart content matching.
    */
   async findByTags(tenantId: string, input: FindByTagsInput): Promise<FindByTagsResult> {
-    return this.transport.post<FindByTagsResult>(
+    // Rello returns `ok<LeadsByTagsResponse>(leads, { meta: { total } })` — the
+    // lead array is the envelope `data`, total lives under `meta`. Legacy
+    // un-enveloped deployments returned `{ leads, total }` at the top level.
+    const res = await this.transport.post<unknown>(
       "/leads/by-tags",
       tenantId,
       input
     );
+    if (res && typeof res === "object" && "success" in res && "data" in res) {
+      const env = res as { data?: Lead[]; meta?: { total?: number } };
+      const leads = env.data ?? [];
+      return { leads, total: env.meta?.total ?? leads.length };
+    }
+    const legacy = (res ?? {}) as FindByTagsResult;
+    return { leads: legacy.leads ?? [], total: legacy.total ?? legacy.leads?.length ?? 0 };
   }
 
   /**
@@ -374,7 +418,11 @@ export class LeadsResource {
    * and freshness info. Used by the LeadStoryCard on the lead detail Overview tab.
    */
   async getContextCache(tenantId: string, leadId: string): Promise<ContextCacheResponse> {
-    return this.transport.getRaw<ContextCacheResponse>(`/leads/${leadId}/context-cache`, tenantId);
+    // Rello returns `ok<LeadContextCacheGetResponse>({ exists, leadId, ... })`
+    // via the `/api` (non-v1) route — unwrap the envelope to the bare payload.
+    // Legacy un-enveloped deployments returned the payload directly.
+    const res = await this.transport.getRaw<unknown>(`/leads/${leadId}/context-cache`, tenantId);
+    return unwrapData<ContextCacheResponse>(res);
   }
 
   /**

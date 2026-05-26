@@ -301,32 +301,28 @@ var Transport = class {
 };
 
 // src/resources/leads.ts
+function unwrapData(res) {
+  return res && typeof res === "object" && "success" in res && "data" in res ? res.data : res;
+}
+function unwrapLead(res) {
+  const payload = unwrapData(res);
+  return payload && typeof payload === "object" && "lead" in payload ? payload.lead : payload;
+}
 var LeadsResource = class {
   constructor(transport) {
     this.transport = transport;
   }
   async create(tenantId, data) {
-    const res = await this.transport.post(
-      "/leads",
-      tenantId,
-      data
-    );
-    return "lead" in res ? res.lead : res;
+    const res = await this.transport.post("/leads", tenantId, data);
+    return unwrapLead(res);
   }
   async get(tenantId, id) {
-    const res = await this.transport.get(
-      `/leads/${id}`,
-      tenantId
-    );
-    return "lead" in res ? res.lead : res;
+    const res = await this.transport.get(`/leads/${id}`, tenantId);
+    return unwrapLead(res);
   }
   async update(tenantId, id, data) {
-    const res = await this.transport.patch(
-      `/leads/${id}`,
-      tenantId,
-      data
-    );
-    return "lead" in res ? res.lead : res;
+    const res = await this.transport.patch(`/leads/${id}`, tenantId, data);
+    return unwrapLead(res);
   }
   /**
    * Find a lead by exact email match within a tenant.
@@ -460,10 +456,11 @@ var LeadsResource = class {
     await this.transport.patch(`/leads/${id}/custom-fields`, tenantId, { customFields: fields });
   }
   async getConversionScore(tenantId, id) {
-    return this.transport.get(
+    const res = await this.transport.get(
       `/leads/${id}/conversion-score`,
       tenantId
     );
+    return unwrapData(res);
   }
   /**
    * Fetch the lead's Rello-platform-closed loans from the
@@ -485,7 +482,8 @@ var LeadsResource = class {
       `/leads/${id}/closed-loans`,
       tenantId
     );
-    return res.closedLoans;
+    const payload = unwrapData(res);
+    return payload?.closedLoans ?? null;
   }
   /**
    * Remove tags from a lead by tag name.
@@ -515,8 +513,13 @@ var LeadsResource = class {
     const query = {};
     if (params.limit !== void 0) query.limit = String(params.limit);
     if (params.action) query.action = params.action;
-    const res = await this.transport.get(`/leads/${id}/nurture-decisions`, tenantId, query);
-    return res.decisions;
+    const res = await this.transport.get(
+      `/leads/${id}/nurture-decisions`,
+      tenantId,
+      query
+    );
+    const payload = unwrapData(res);
+    return Array.isArray(payload) ? payload : payload?.decisions ?? [];
   }
   /**
    * Query leads by tag combinations (AND/OR with optional exclusions).
@@ -526,11 +529,18 @@ var LeadsResource = class {
    * Used for audience segmentation in Newsletter Studio's smart content matching.
    */
   async findByTags(tenantId, input) {
-    return this.transport.post(
+    const res = await this.transport.post(
       "/leads/by-tags",
       tenantId,
       input
     );
+    if (res && typeof res === "object" && "success" in res && "data" in res) {
+      const env = res;
+      const leads = env.data ?? [];
+      return { leads, total: env.meta?.total ?? leads.length };
+    }
+    const legacy = res ?? {};
+    return { leads: legacy.leads ?? [], total: legacy.total ?? legacy.leads?.length ?? 0 };
   }
   /**
    * Fetch tags for multiple leads in a single call.
@@ -558,7 +568,8 @@ var LeadsResource = class {
    * and freshness info. Used by the LeadStoryCard on the lead detail Overview tab.
    */
   async getContextCache(tenantId, leadId) {
-    return this.transport.getRaw(`/leads/${leadId}/context-cache`, tenantId);
+    const res = await this.transport.getRaw(`/leads/${leadId}/context-cache`, tenantId);
+    return unwrapData(res);
   }
   /**
    * Record an offline interaction for a lead.
