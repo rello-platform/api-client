@@ -360,7 +360,7 @@ var LeadsResource = class {
         tenantId,
         { email, search: email, limit: "25" }
       );
-      const leads = Array.isArray(res) ? res : res.leads;
+      const leads = Array.isArray(res) ? res : res.data ?? res.leads ?? [];
       const normalizedEmail = email.toLowerCase().trim();
       return leads.find(
         (l) => typeof l.email === "string" && l.email.toLowerCase().trim() === normalizedEmail
@@ -444,16 +444,13 @@ var LeadsResource = class {
     } else if (params.email) {
       query.search = params.email;
     }
-    const res = await this.transport.get(
-      "/leads",
-      tenantId,
-      query
-    );
+    const res = await this.transport.get("/leads", tenantId, query);
+    const leads = res.data ?? res.leads ?? [];
     return {
-      leads: res.leads,
-      total: res.total,
-      page: res.page,
-      totalPages: res.totalPages
+      leads,
+      total: res.meta?.total ?? res.total ?? leads.length,
+      page: res.meta?.page ?? res.page ?? 1,
+      totalPages: res.meta?.totalPages ?? res.totalPages ?? 1
     };
   }
   async applyTags(tenantId, id, tags) {

@@ -74,12 +74,16 @@ export class LeadsResource {
     if (!email) return null;
 
     try {
-      const res = await this.transport.get<{ leads: Lead[] } | Lead[]>(
+      const res = await this.transport.get<{ data?: Lead[]; leads?: Lead[] } | Lead[]>(
         "/leads",
         tenantId,
         { email, search: email, limit: "25" }
       );
-      const leads = Array.isArray(res) ? res : res.leads;
+      // Canonical Rello returns `{ success, data, meta }` (lead array under
+      // `data`); legacy/array shapes are handled by the fallbacks. This dedup
+      // read feeds createOrFind — a correct read restores email dedup
+      // platform-wide.
+      const leads = Array.isArray(res) ? res : (res.data ?? res.leads ?? []);
 
       // Defensive client-side exact-match filter. On a new Rello this is a
       // no-op (server already returned 0 or 1). On an old Rello this is the
@@ -215,16 +219,28 @@ export class LeadsResource {
       query.search = params.email;
     }
 
-    const res = await this.transport.get<{ leads: Lead[]; total: number; page: number; totalPages: number }>(
-      "/leads",
-      tenantId,
-      query
-    );
+    // Rello's GET /api/leads returns the canonical envelope
+    // `ok<T>(result.leads, { meta })` = `{ success, data, meta }`, where the
+    // lead array is `data` and pagination lives under
+    // `meta.{total,page,totalPages,pageSize}` (Rello src/lib/api-envelope.ts +
+    // src/app/api/leads/route.ts). The transport returns the full envelope
+    // (other resource methods read `res.data`). Older un-enveloped Rello
+    // deployments returned `{ leads, total, page, totalPages }` at the top
+    // level — the `??` fallbacks preserve compatibility with both shapes.
+    const res = await this.transport.get<{
+      data?: Lead[];
+      meta?: { total?: number; page?: number; totalPages?: number; pageSize?: number };
+      leads?: Lead[];
+      total?: number;
+      page?: number;
+      totalPages?: number;
+    }>("/leads", tenantId, query);
+    const leads = res.data ?? res.leads ?? [];
     return {
-      leads: res.leads,
-      total: res.total,
-      page: res.page,
-      totalPages: res.totalPages,
+      leads,
+      total: res.meta?.total ?? res.total ?? leads.length,
+      page: res.meta?.page ?? res.page ?? 1,
+      totalPages: res.meta?.totalPages ?? res.totalPages ?? 1,
     };
   }
 
