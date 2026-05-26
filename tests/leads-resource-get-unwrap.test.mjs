@@ -67,3 +67,74 @@ test("LeadsResource.get(): unwraps Lead when envelope has only { lead } (no milo
     assert.equal("lead" in result, false);
   });
 });
+
+// ── LIST / LIST-WITH-PAGINATION / FIND-BY-EMAIL envelope parsing ──
+// Rello's GET /api/leads returns ok<T>(result.leads, { meta }) =
+// { success, data, meta:{ total, page, totalPages, pageSize } }. The lead
+// array is `data`; pagination is under `meta`. (CR-2 fix — v2.20.0.)
+
+const FIXTURE_LEAD_2 = {
+  id: "lead_test_456",
+  email: "second@example.com",
+  firstName: "Second",
+  lastName: "Lead",
+  tenantId: "tenant_test",
+};
+
+function canonicalLeadsEnvelope(leads, metaOverrides = {}) {
+  return {
+    success: true,
+    data: leads,
+    meta: { total: leads.length, page: 1, totalPages: 1, pageSize: leads.length, ...metaOverrides },
+  };
+}
+
+test("LeadsResource.listWithPagination(): reads leads from .data and pagination from .meta", async () => {
+  const body = canonicalLeadsEnvelope([FIXTURE_LEAD, FIXTURE_LEAD_2], { total: 89, page: 1, totalPages: 30, pageSize: 2 });
+  await withClient(async () => jsonResponse(body), async (client) => {
+    const page = await client.leads.listWithPagination("tenant_test", { search: "an", limit: 2 });
+    assert.equal(Array.isArray(page.leads), true);
+    assert.equal(page.leads.length, 2, "leads must come from envelope.data");
+    assert.equal(page.leads[0].id, FIXTURE_LEAD.id);
+    assert.equal(page.total, 89, "total must come from envelope.meta.total");
+    assert.equal(page.page, 1);
+    assert.equal(page.totalPages, 30, "totalPages must come from envelope.meta.totalPages");
+  });
+});
+
+test("LeadsResource.list(): returns the Lead[] from envelope.data", async () => {
+  const body = canonicalLeadsEnvelope([FIXTURE_LEAD, FIXTURE_LEAD_2], { total: 2 });
+  await withClient(async () => jsonResponse(body), async (client) => {
+    const leads = await client.leads.list("tenant_test", { search: "e" });
+    assert.equal(Array.isArray(leads), true, "list() must return an array, not undefined");
+    assert.equal(leads.length, 2);
+    assert.equal(leads[1].email, FIXTURE_LEAD_2.email);
+  });
+});
+
+test("LeadsResource.list(): empty result → empty array (not undefined)", async () => {
+  const body = canonicalLeadsEnvelope([], { total: 0, totalPages: 0 });
+  await withClient(async () => jsonResponse(body), async (client) => {
+    const leads = await client.leads.list("tenant_test", { search: "zzzznomatch" });
+    assert.equal(Array.isArray(leads), true);
+    assert.equal(leads.length, 0);
+  });
+});
+
+test("LeadsResource.findByEmail(): finds the lead inside the { success, data, meta } envelope", async () => {
+  const body = canonicalLeadsEnvelope([FIXTURE_LEAD], { total: 1 });
+  await withClient(async () => jsonResponse(body), async (client) => {
+    const lead = await client.leads.findByEmail("tenant_test", "buyer@example.com");
+    assert.notEqual(lead, null, "findByEmail must locate the lead in envelope.data (dedup-critical)");
+    assert.equal(lead.id, FIXTURE_LEAD.id);
+  });
+});
+
+test("LeadsResource.listWithPagination(): legacy un-enveloped { leads, total } shape still parses", async () => {
+  const legacy = { leads: [FIXTURE_LEAD], total: 7, page: 1, totalPages: 7 };
+  await withClient(async () => jsonResponse(legacy), async (client) => {
+    const page = await client.leads.listWithPagination("tenant_test", { search: "x" });
+    assert.equal(page.leads.length, 1, "legacy top-level .leads must still be read via fallback");
+    assert.equal(page.total, 7, "legacy top-level .total must still be read via fallback");
+  });
+});
