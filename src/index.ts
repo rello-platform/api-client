@@ -59,6 +59,14 @@ export {
   type ServiceBearerGuardConfig,
 } from "./platform-key-validator.js";
 
+// Deploy-time spoke→Rello permission self-check (outbound counterpart to the validator)
+export {
+  runRelloPermissionSelfCheck,
+  createRelloPermissionSelfCheck,
+  type RelloPermissionSelfCheckConfig,
+  type SelfCheckResult,
+} from "./rello-permission-selfcheck.js";
+
 // Resource classes (for advanced consumers who need direct access)
 export { AuthResource } from "./resources/auth.js";
 export { AdminResource } from "./resources/admin.js";

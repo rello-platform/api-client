@@ -1998,6 +1998,54 @@ declare function createServiceBearerGuard(config: ServiceBearerGuardConfig): (re
     permission: PermissionSlug;
 }) => Promise<PlatformCaller | Response>;
 
+interface RelloPermissionSelfCheckConfig {
+    /** Rello API base URL (domain root; must NOT include "/api"). Normalized like createPlatformKeyValidator. */
+    relloApiUrl: string;
+    /** The wired `<SPOKE>_TO_RELLO_API_KEY` value to validate (the same value the production client resolves). */
+    relloApiKey: string;
+    /** This spoke's expected appSource — UPPER_SNAKE or kebab; normalized before the pair assertion. */
+    ownAppSource: string;
+    /** The spoke's `REQUIRED_RELLO_PERMISSIONS` — slugs from `@rello-platform/permissions`, never hand-typed. */
+    requiredPermissions: readonly PermissionSlug[];
+    /** Fetch timeout in ms. Default 10_000 (mirrors createPlatformKeyValidator). */
+    timeoutMs?: number;
+}
+type SelfCheckResult = {
+    ok: true;
+    keyId: string;
+    appSource: string;
+    permissions: PermissionSlug[];
+} | {
+    ok: false;
+    class: "missing-permissions";
+    keyId: string;
+    missing: PermissionSlug[];
+} | {
+    ok: false;
+    class: "wrong-pair";
+    expected: string;
+    actual: string;
+} | {
+    ok: false;
+    class: "invalid-key";
+} | {
+    ok: false;
+    class: "rello-unreachable";
+    status: number | "network" | "timeout";
+};
+/**
+ * Run the self-check once and classify the result. Never throws — every failure
+ * mode maps to a `SelfCheckResult` so the caller (a deploy-time runner) decides
+ * exit posture. `rello-unreachable` is the fail-safe bucket (exit 0, never block).
+ */
+declare function runRelloPermissionSelfCheck(config: RelloPermissionSelfCheckConfig): Promise<SelfCheckResult>;
+/**
+ * Factory mirroring `createPlatformKeyValidator`'s shape: binds config once and
+ * returns a zero-arg runner. Spokes whose runner script captures config at module
+ * scope can use either this or `runRelloPermissionSelfCheck` directly.
+ */
+declare function createRelloPermissionSelfCheck(config: RelloPermissionSelfCheckConfig): () => Promise<SelfCheckResult>;
+
 /**
  * Base error class for all Rello API errors.
  */
@@ -2421,4 +2469,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, runRelloPermissionSelfCheck, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };

@@ -1765,6 +1765,71 @@ function safePath(request) {
   }
 }
 
+// src/rello-permission-selfcheck.ts
+function toUpperSnake(raw) {
+  return raw.toUpperCase().replace(/-/g, "_");
+}
+async function runRelloPermissionSelfCheck(config) {
+  const baseUrl = config.relloApiUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
+  const url = `${baseUrl}/api/v1/platform/service-keys/self`;
+  const timeoutMs = config.timeoutMs ?? 1e4;
+  if (!config.relloApiKey) {
+    return { ok: false, class: "invalid-key" };
+  }
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${config.relloApiKey}`,
+        "Content-Type": "application/json"
+      },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return { ok: false, class: "rello-unreachable", status: "timeout" };
+    }
+    return { ok: false, class: "rello-unreachable", status: "network" };
+  }
+  if (!res.ok) {
+    if (res.status === 401) {
+      return { ok: false, class: "invalid-key" };
+    }
+    return { ok: false, class: "rello-unreachable", status: res.status };
+  }
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false, class: "rello-unreachable", status: res.status };
+  }
+  if (typeof body?.keyId !== "string" || typeof body?.appSource !== "string") {
+    return { ok: false, class: "rello-unreachable", status: res.status };
+  }
+  const expected = toUpperSnake(config.ownAppSource);
+  const actual = toUpperSnake(body.appSource);
+  if (expected !== actual) {
+    return { ok: false, class: "wrong-pair", expected, actual };
+  }
+  const returned = body.permissions ?? [];
+  const hasWildcard = returned.includes("*");
+  const missing = config.requiredPermissions.filter(
+    (p) => !hasWildcard && !returned.includes(p)
+  );
+  if (missing.length > 0) {
+    return { ok: false, class: "missing-permissions", keyId: body.keyId, missing: [...missing] };
+  }
+  return {
+    ok: true,
+    keyId: body.keyId,
+    appSource: body.appSource,
+    permissions: returned
+  };
+}
+function createRelloPermissionSelfCheck(config) {
+  return () => runRelloPermissionSelfCheck(config);
+}
+
 // src/types/property-autofill.ts
 var PROPERTY_AUTOFILL_FIELD_KEYS = [
   "beds",
@@ -1924,6 +1989,7 @@ export {
   callerHasPermission,
   createPlatformKeyValidator,
   createRelloClient,
+  createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
   getHarvestHomeBaseUrl,
@@ -1937,6 +2003,7 @@ export {
   parseAgentPayload,
   parseTenantPayload,
   provisionedAgentSchema,
+  runRelloPermissionSelfCheck,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,
   tenantProvisioningPayloadSchema
