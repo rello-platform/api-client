@@ -209,7 +209,18 @@ export class LeadsResource {
     if (params.stage) query.stage = params.stage;
     if (params.sortBy) query.sortBy = params.sortBy;
     if (params.sortOrder) query.sortOrder = params.sortOrder;
-    if (params.agentId) query.agentId = params.agentId;
+    // Owner filter → server-canonical `?ownerId=` (Rello `getLeads` filters on
+    // `Lead.ownerId`). `ownerId` is the preferred param; `agentId` is a
+    // deprecated alias forwarded to the SAME server param — earlier SDK
+    // versions forwarded it as `?agentId=`, which the server silently ignored
+    // (a no-op no caller can rely on), so repairing it to `?ownerId=` here is
+    // back-compat-safe. `ownerId` wins when both are supplied.
+    const ownerFilter = params.ownerId ?? params.agentId;
+    if (ownerFilter) query.ownerId = ownerFilter;
+    // Originating-app filter → server-canonical `?source=` (exact match on
+    // `Lead.source`). Lets a consumer fetch only the leads its own app
+    // originated (e.g. `source: "pathfinder-pro"`).
+    if (params.source) query.source = params.source;
 
     // `email` and `search` are now independent server params:
     //   email  → exact case-insensitive match (returns 0 or 1 lead)

@@ -158,8 +158,32 @@ export interface ListLeadsParams {
   stage?: string;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
-  /** Filter leads by assigned agent (Rello User ID). */
+  /**
+   * Filter leads by the OWNING agent. This is the Rello **User.id** of the
+   * owning MLO (the same value you pass as `ownerId` on `create`), NOT an
+   * app-specific agent id. Forwarded to the server as `?ownerId=`, which is
+   * the canonical server-side owner filter (Rello `getLeads` filters on
+   * `Lead.ownerId`).
+   */
+  ownerId?: string;
+  /**
+   * @deprecated Use `ownerId` instead — `agentId` is a back-compat alias for
+   * the same Rello User.id and is forwarded to the server as `?ownerId=`.
+   * Earlier SDK versions forwarded this as `?agentId=`, which the Rello server
+   * silently ignored (it has always read `ownerId`), so the previous param was
+   * a no-op no caller can depend on; this release repairs it to the working
+   * `ownerId` filter. When both `ownerId` and `agentId` are supplied, `ownerId`
+   * wins.
+   */
   agentId?: string;
+  /**
+   * Filter leads by their originating app slug — the canonical
+   * lowercase-hyphenated AppSlug stored on `Lead.source` (e.g.
+   * "pathfinder-pro", "home-ready"). Forwarded as `?source=`; the server
+   * applies an exact match. Lets a consumer fetch only the leads its own app
+   * originated.
+   */
+  source?: string;
 }
 
 /** Paginated leads response — preserves the pagination envelope from the server. */

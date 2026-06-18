@@ -433,7 +433,9 @@ var LeadsResource = class {
     if (params.stage) query.stage = params.stage;
     if (params.sortBy) query.sortBy = params.sortBy;
     if (params.sortOrder) query.sortOrder = params.sortOrder;
-    if (params.agentId) query.agentId = params.agentId;
+    const ownerFilter = params.ownerId ?? params.agentId;
+    if (ownerFilter) query.ownerId = ownerFilter;
+    if (params.source) query.source = params.source;
     if (params.email) query.email = params.email;
     if (params.search) {
       query.search = params.search;
