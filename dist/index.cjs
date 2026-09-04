@@ -40,6 +40,8 @@ __export(index_exports, {
   createServiceBearerGuard: () => createServiceBearerGuard,
   createServiceClient: () => createServiceClient,
   getHarvestHomeBaseUrl: () => getHarvestHomeBaseUrl,
+  getImplicitApiKeyCount: () => getImplicitApiKeyCount,
+  getImplicitApiKeyUses: () => getImplicitApiKeyUses,
   getMiloBaseUrl: () => getMiloBaseUrl,
   getOvenBaseUrl: () => getOvenBaseUrl,
   getPathfinderProBaseUrl: () => getPathfinderProBaseUrl,
@@ -50,6 +52,7 @@ __export(index_exports, {
   parseAgentPayload: () => parseAgentPayload,
   parseTenantPayload: () => parseTenantPayload,
   provisionedAgentSchema: () => provisionedAgentSchema,
+  resetImplicitApiKeyUses: () => resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck: () => runRelloPermissionSelfCheck,
   tenantDisablePayloadSchema: () => tenantDisablePayloadSchema,
   tenantEnablePayloadSchema: () => tenantEnablePayloadSchema,
@@ -1491,10 +1494,47 @@ var AdminResource = class {
   }
 };
 
+// src/implicit-apikey-telemetry.ts
+var uses = /* @__PURE__ */ new Map();
+function recordImplicitApiKey(site) {
+  const existing = uses.get(site);
+  if (existing) {
+    existing.count += 1;
+    return;
+  }
+  uses.set(site, { site, count: 1, firstSeenAt: Date.now() });
+}
+function getImplicitApiKeyUses() {
+  return [...uses.values()].sort((a, b) => b.count - a.count);
+}
+function getImplicitApiKeyCount() {
+  return uses.size;
+}
+function resetImplicitApiKeyUses() {
+  uses.clear();
+}
+function callerSite() {
+  const err = new Error();
+  const stack = err.stack;
+  if (!stack) return "<unknown: no stack available>";
+  const lines = stack.split("\n");
+  for (const line of lines) {
+    if (!line.includes("at ")) continue;
+    if (line.includes("implicit-apikey-telemetry")) continue;
+    if (line.includes("client.ts") || line.includes("client.js")) continue;
+    if (line.includes("/@rello-platform/api-client/")) continue;
+    if (line.includes("node:internal")) continue;
+    const m = /\(?([^()\s]+:\d+:\d+)\)?\s*$/.exec(line.trim());
+    if (m) return m[1];
+  }
+  return "<unknown: no caller frame outside the package>";
+}
+
 // src/client.ts
 var RelloClient = class {
   constructor(config = {}) {
     const baseUrl = config.baseUrl ?? process.env.RELLO_API_URL ?? "";
+    const apiKeyWasExplicit = config.apiKey !== void 0 && config.apiKey !== "";
     const apiKey = config.apiKey ?? process.env.RELLO_API_KEY ?? "";
     const appSlug = config.appSlug ?? process.env.APP_SLUG ?? process.env.RELLO_APP_SLUG ?? "";
     if (!baseUrl) {
@@ -1505,6 +1545,22 @@ var RelloClient = class {
     if (!apiKey) {
       throw new Error(
         "@rello-platform/api-client: apiKey is required. Set RELLO_API_KEY env var or pass apiKey in config."
+      );
+    }
+    if (!apiKeyWasExplicit) {
+      const site = callerSite();
+      if (config.requireExplicitApiKey) {
+        throw new Error(
+          `@rello-platform/api-client: apiKey must be passed explicitly (requireExplicitApiKey: true), but it was resolved from the RELLO_API_KEY env var instead.
+  constructed at: ${site}
+  A spoke that means to use its own <SPOKE>_TO_RELLO_API_KEY and omits it silently authenticates as whatever RELLO_API_KEY holds \u2014 which fails later as a 401, far from this line.`
+        );
+      }
+      recordImplicitApiKey(site);
+      console.warn(
+        `[@rello-platform/api-client] DEPRECATED: apiKey resolved from the RELLO_API_KEY env var rather than passed explicitly.
+  constructed at: ${site}
+  Pass the key this caller actually intends. The fallback is removed in v3.0.0, and until then it silently substitutes RELLO_API_KEY for a key you may not have meant.`
       );
     }
     const rawSignalKey = config.signalKey || process.env.RELLO_SIGNAL_KEY || process.env.SIGNAL_ROUTER_SECRET || "";
@@ -2055,6 +2111,8 @@ function createServiceClient(config) {
   createServiceBearerGuard,
   createServiceClient,
   getHarvestHomeBaseUrl,
+  getImplicitApiKeyCount,
+  getImplicitApiKeyUses,
   getMiloBaseUrl,
   getOvenBaseUrl,
   getPathfinderProBaseUrl,
@@ -2065,6 +2123,7 @@ function createServiceClient(config) {
   parseAgentPayload,
   parseTenantPayload,
   provisionedAgentSchema,
+  resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,

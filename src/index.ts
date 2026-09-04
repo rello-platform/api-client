@@ -180,3 +180,13 @@ export {
   parseAgentPayload,
 } from "./types/index.js";
 
+
+// Implicit-apiKey telemetry — lets a process be ASKED how many construction
+// sites still rely on the RELLO_API_KEY fallback, rather than tailing a log a
+// Trigger.dev worker writes to nobody. See implicit-apikey-telemetry.ts.
+export {
+  getImplicitApiKeyUses,
+  getImplicitApiKeyCount,
+  resetImplicitApiKeyUses,
+  type ImplicitApiKeyUse,
+} from "./implicit-apikey-telemetry.js";

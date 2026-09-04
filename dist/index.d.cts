@@ -1595,6 +1595,25 @@ interface RelloClientConfig {
     baseUrl?: string;
     /** API key for authentication. Default: RELLO_API_KEY env var. */
     apiKey?: string;
+    /**
+     * Refuse to fall back to the RELLO_API_KEY env var — require `apiKey` to be
+     * passed explicitly, and THROW at construction if it is not.
+     *
+     * Opt-in in v2.26.0 and the default in v3.0.0.
+     *
+     * WHY THIS EXISTS. The env fallback does not make a missing key silent — the
+     * constructor already throws when nothing resolves. What it makes silent is a
+     * WRONG key: a caller that means to use its own pair credential
+     * (`<SPOKE>_TO_RELLO_API_KEY`) but forgets to pass it silently gets
+     * RELLO_API_KEY instead. Both clients construct identically, and the mistake
+     * surfaces later as a 401 on a different line in a different file. Three
+     * spokes carry comments asking future authors to remember to pass one
+     * explicitly, which is the shape this replaces: a rule that must be
+     * remembered eventually is not.
+     *
+     * A startup failure is a fixable Tuesday. A silent deferral is a hundred days.
+     */
+    requireExplicitApiKey?: boolean;
     /** This app's slug identifier. Default: APP_SLUG env var. */
     appSlug?: string;
     /**
@@ -2469,6 +2488,55 @@ declare function parseAgentPayload(body: unknown): {
 };
 
 /**
+ * implicit-apikey-telemetry — make the implicit-RELLO_API_KEY fallback COUNTABLE.
+ *
+ * WHY A WARNING ALONE IS NOT ENOUGH
+ * --------------------------------
+ * A `console.warn` in a Trigger.dev worker goes somewhere nobody reads. This
+ * platform has been bitten by exactly that shape more than once — a mechanism
+ * that reports honestly and hands off to nothing. "The fallback fired" is also
+ * useless across fourteen construction sites in one repo: without knowing WHICH
+ * site, a shrinking list cannot shrink.
+ *
+ * So the fallback does three things, in increasing order of readability:
+ *
+ *   1. warns, with the CONSTRUCTION SITE attached (see `callerSite`);
+ *   2. records the site here, so a process can be ASKED rather than tailed —
+ *      `getImplicitApiKeyUses()` is exported for a health endpoint, a startup
+ *      assertion, or a test;
+ *   3. is counted STATICALLY by `rello-scripts check-explicit-apikey`, which is
+ *      where the number that actually shrinks comes from. Construction sites are
+ *      statically visible — that is how "24 of 34" was measured in the first
+ *      place — so the count does not depend on anyone reading a log, or on the
+ *      code path even running.
+ *
+ * The runtime half still earns its place: it catches a site the scanner cannot
+ * see (a client built from a factory, a config object assembled at runtime), and
+ * it is what makes `requireExplicitApiKey: true` actionable per-repo.
+ */
+/** One implicit construction, keyed by site so repeats collapse. */
+interface ImplicitApiKeyUse {
+    /** `file:line:col` of the construction site, or a fallback label. */
+    site: string;
+    /** How many times this site constructed with the implicit fallback. */
+    count: number;
+    /** Epoch ms of the first occurrence — useful when correlating with a deploy. */
+    firstSeenAt: number;
+}
+/**
+ * Every construction site in THIS PROCESS that used the implicit fallback.
+ *
+ * Process-local by design — this is not a metrics pipeline, it is a thing a
+ * process can be asked. Surface it from a health endpoint or assert on it in a
+ * startup test; do not expect it to survive a restart.
+ */
+declare function getImplicitApiKeyUses(): ImplicitApiKeyUse[];
+/** Total implicit constructions in this process. Zero is the goal. */
+declare function getImplicitApiKeyCount(): number;
+/** Test seam. */
+declare function resetImplicitApiKeyUses(): void;
+
+/**
  * Create a typed Rello API client. Reads config from env vars by default:
  *   RELLO_API_URL  — base URL (must NOT include "/api")
  *   RELLO_API_KEY  — API key (required if not passed in config)
@@ -2493,4 +2561,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, runRelloPermissionSelfCheck, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };

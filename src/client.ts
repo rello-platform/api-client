@@ -20,12 +20,32 @@ import { ReportsResource } from "./resources/reports.js";
 import { AuthResource } from "./resources/auth.js";
 import { AdminResource } from "./resources/admin.js";
 import type { ServiceClient } from "./service-client.js";
+import { callerSite, recordImplicitApiKey } from "./implicit-apikey-telemetry.js";
 
 export interface RelloClientConfig {
   /** Rello API base URL. Default: RELLO_API_URL env var. Must NOT include "/api". */
   baseUrl?: string;
   /** API key for authentication. Default: RELLO_API_KEY env var. */
   apiKey?: string;
+  /**
+   * Refuse to fall back to the RELLO_API_KEY env var — require `apiKey` to be
+   * passed explicitly, and THROW at construction if it is not.
+   *
+   * Opt-in in v2.26.0 and the default in v3.0.0.
+   *
+   * WHY THIS EXISTS. The env fallback does not make a missing key silent — the
+   * constructor already throws when nothing resolves. What it makes silent is a
+   * WRONG key: a caller that means to use its own pair credential
+   * (`<SPOKE>_TO_RELLO_API_KEY`) but forgets to pass it silently gets
+   * RELLO_API_KEY instead. Both clients construct identically, and the mistake
+   * surfaces later as a 401 on a different line in a different file. Three
+   * spokes carry comments asking future authors to remember to pass one
+   * explicitly, which is the shape this replaces: a rule that must be
+   * remembered eventually is not.
+   *
+   * A startup failure is a fixable Tuesday. A silent deferral is a hundred days.
+   */
+  requireExplicitApiKey?: boolean;
   /** This app's slug identifier. Default: APP_SLUG env var. */
   appSlug?: string;
   /**
@@ -75,6 +95,7 @@ export class RelloClient {
       ?? process.env.RELLO_API_URL
       ?? "";
 
+    const apiKeyWasExplicit = config.apiKey !== undefined && config.apiKey !== "";
     const apiKey = config.apiKey
       ?? process.env.RELLO_API_KEY
       ?? "";
@@ -95,6 +116,31 @@ export class RelloClient {
       throw new Error(
         "@rello-platform/api-client: apiKey is required. " +
         "Set RELLO_API_KEY env var or pass apiKey in config."
+      );
+    }
+
+    // The implicit-fallback path: a key resolved, but not from the caller.
+    if (!apiKeyWasExplicit) {
+      const site = callerSite();
+      if (config.requireExplicitApiKey) {
+        throw new Error(
+          "@rello-platform/api-client: apiKey must be passed explicitly " +
+          "(requireExplicitApiKey: true), but it was resolved from the " +
+          "RELLO_API_KEY env var instead.\n" +
+          `  constructed at: ${site}\n` +
+          "  A spoke that means to use its own <SPOKE>_TO_RELLO_API_KEY and " +
+          "omits it silently authenticates as whatever RELLO_API_KEY holds — " +
+          "which fails later as a 401, far from this line."
+        );
+      }
+      recordImplicitApiKey(site);
+      console.warn(
+        "[@rello-platform/api-client] DEPRECATED: apiKey resolved from the " +
+        `RELLO_API_KEY env var rather than passed explicitly.\n` +
+        `  constructed at: ${site}\n` +
+        "  Pass the key this caller actually intends. The fallback is removed " +
+        "in v3.0.0, and until then it silently substitutes RELLO_API_KEY for a " +
+        "key you may not have meant."
       );
     }
 
