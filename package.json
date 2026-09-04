@@ -1,21 +1,14 @@
 {
   "name": "@rello-platform/api-client",
-  "version": "2.25.0",
+  "version": "2.23.0",
   "description": "Unified API client for Rello platform spoke apps",
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "files": [
@@ -29,7 +22,8 @@
     "test": "tsup && node --test tests/*.test.mjs",
     "prepublishOnly": "npm run build",
     "openapi:generate": "npx openapi-typescript ../Rello/public/openapi.json -o src/generated/api-types.ts",
-    "openapi:generate-remote": "npx openapi-typescript https://hellorello.app/api/openapi -o src/generated/api-types.ts"
+    "openapi:generate-remote": "npx openapi-typescript https://hellorello.app/api/openapi -o src/generated/api-types.ts",
+    "prepare": "git config core.hooksPath .husky || true"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
