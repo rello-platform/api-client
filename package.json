@@ -1,6 +1,6 @@
 {
   "name": "@rello-platform/api-client",
-  "version": "2.27.0",
+  "version": "2.28.0",
   "description": "Unified API client for Rello platform spoke apps",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -49,8 +49,8 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
-    "@rello-platform/permissions": "github:rello-platform/permissions#v0.3.0",
-    "@rello-platform/slugs": "github:rello-platform/slugs#v0.3.0",
+    "@rello-platform/permissions": "github:rello-platform/permissions#v0.54.0",
+    "@rello-platform/slugs": "github:rello-platform/slugs#v0.7.0",
     "zod": "^4.3.6"
   }
 }
