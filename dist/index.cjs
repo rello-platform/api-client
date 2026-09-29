@@ -1673,6 +1673,7 @@ function createPlatformKeyValidator(config) {
   let lastFetchTime = 0;
   let lastSuccessTime = 0;
   let lastFetchStatus = "init";
+  let lastFetchHttpStatus = null;
   let staleServeWarningEmitted = false;
   let capExceedWarningEmitted = false;
   let fetchInProgress = null;
@@ -1688,15 +1689,21 @@ function createPlatformKeyValidator(config) {
       });
       lastFetchTime = Date.now();
       if (!res.ok) {
+        lastFetchHttpStatus = res.status;
         if (res.status >= 500) {
           lastFetchStatus = "5xx";
           console.warn(
             `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (will stale-serve if cache populated)`
           );
-        } else {
-          lastFetchStatus = "4xx";
+        } else if (res.status === 401 || res.status === 403) {
+          lastFetchStatus = "auth-refused";
           console.warn(
-            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx \u2014 fail-closed; check RELLO_API_KEY for credential drift)`
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx auth refusal \u2014 fail-closed; check RELLO_API_KEY for credential drift)`
+          );
+        } else {
+          lastFetchStatus = "4xx-other";
+          console.warn(
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx, not an answer about our credential \u2014 will stale-serve if cache populated)`
           );
         }
         return;
@@ -1705,6 +1712,7 @@ function createPlatformKeyValidator(config) {
       const keys = data.keys;
       if (!Array.isArray(keys)) {
         lastFetchStatus = "5xx";
+        lastFetchHttpStatus = null;
         console.warn("[platform-key-validator] Invalid response: keys is not an array (treating as 5xx)");
         return;
       }
@@ -1719,10 +1727,12 @@ function createPlatformKeyValidator(config) {
       });
       lastSuccessTime = lastFetchTime;
       lastFetchStatus = "ok";
+      lastFetchHttpStatus = null;
       staleServeWarningEmitted = false;
       capExceedWarningEmitted = false;
     } catch (error) {
       lastFetchTime = Date.now();
+      lastFetchHttpStatus = null;
       if (error instanceof DOMException && error.name === "AbortError") {
         lastFetchStatus = "timeout";
         console.warn("[platform-key-validator] Rello request timed out (will stale-serve if cache populated)");
@@ -1752,14 +1762,15 @@ function createPlatformKeyValidator(config) {
     const tokenHash = (0, import_crypto3.createHash)("sha256").update(token).digest("hex");
     await ensureFreshCache();
     if (lastSuccessTime === 0) return null;
-    if (lastFetchStatus === "4xx") return null;
-    if (lastFetchStatus === "5xx" || lastFetchStatus === "network" || lastFetchStatus === "timeout") {
+    if (lastFetchStatus === "auth-refused") return null;
+    if (lastFetchStatus === "5xx" || lastFetchStatus === "4xx-other" || lastFetchStatus === "network" || lastFetchStatus === "timeout") {
       const staleAgeMs = Date.now() - lastSuccessTime;
       const capMs = cacheTtlMs + staleServeMaxMs;
+      const statusPart = lastFetchHttpStatus === null ? "" : ` status=${lastFetchHttpStatus}`;
       if (staleAgeMs > capMs) {
         if (!capExceedWarningEmitted) {
           console.warn(
-            `[platform-key-validator] WARN cache exceeded stale-serve cap age_ms=${staleAgeMs} capMs=${capMs} reason=upstream-${lastFetchStatus} \u2014 fail-closed until next successful refresh`
+            `[platform-key-validator] WARN cache exceeded stale-serve cap age_ms=${staleAgeMs} capMs=${capMs} reason=upstream-${lastFetchStatus}${statusPart} \u2014 fail-closed until next successful refresh`
           );
           capExceedWarningEmitted = true;
         }
@@ -1767,7 +1778,7 @@ function createPlatformKeyValidator(config) {
       }
       if (!staleServeWarningEmitted) {
         console.warn(
-          `[platform-key-validator] WARN serving stale cache age_ms=${staleAgeMs} reason=upstream-${lastFetchStatus}`
+          `[platform-key-validator] WARN serving stale cache age_ms=${staleAgeMs} reason=upstream-${lastFetchStatus}${statusPart}`
         );
         staleServeWarningEmitted = true;
       }

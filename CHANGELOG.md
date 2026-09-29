@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.28.1 — 2026-09-29
+
+### Fixed — the key validator fails closed only on 401/403 (ruling D-83)
+
+`createPlatformKeyValidator` failed closed on **any** 4xx from the
+service-keys refresh, discarding a good key cache. At 2026-09-29T15:30:07Z a
+single edge 409 on Milo's refresh (the request never reached Rello's app,
+which logged no 4xx) made Milo refuse every inbound platform token for 5
+minutes: 165 refusals, 1 scheduled decision and 1 compose-now lost.
+
+- **401 / 403** → fail closed, as before. They are the only answers about our
+  credential; serving past them would mask credential drift.
+  `lastFetchStatus = "auth-refused"`.
+- **Any other 4xx** (409, 404, 429, 400, …) → stale-serve within the existing
+  `cacheTtlMs + staleServeMaxMs` cap, exactly like a 5xx.
+  `lastFetchStatus = "4xx-other"`, a value it shares with neither `5xx` nor
+  `auth-refused`.
+- No cache yet → still fail closed, whatever the status.
+- The stale-serve and cap warnings now name the real status:
+  `reason=upstream-4xx-other status=409`.
+
+No API change. Consumers need only the pin bump.
+
 ## v2.18.0 — 2026-05-13
 
 ### Added — `ServiceClient.propertyAutofill()` for SPEC-PE-PFP-PROPERTY-AUTOFILL

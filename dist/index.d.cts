@@ -1955,9 +1955,13 @@ interface PlatformKeyValidatorConfig {
     /**
      * Maximum staleness window beyond TTL expiry during which the validator
      * will serve last-good cache when the upstream Rello service-keys endpoint
-     * returns 5xx, network error, or timeout. Past this window the validator
-     * fails closed (returns null on every inbound). 4xx responses always
-     * fail-closed (no stale-serve) to avoid masking credential drift.
+     * returns 5xx, a 4xx other than 401/403, network error, or timeout. Past
+     * this window the validator fails closed (returns null on every inbound).
+     * 401 and 403 always fail closed (no stale-serve): they are the only
+     * answers about OUR credential, and serving past them would mask credential
+     * drift. Any other 4xx (409, 404, 429, …) is an unknown from something
+     * between us and Rello — measured 2026-09-29: an edge 409 that never reached
+     * Rello's app — and is treated like a 5xx (since 2.28.1).
      *
      * Default: 1800000 (30 minutes). Total worst-case stale window =
      * cacheTtlMs + staleServeMaxMs (35 min default).
