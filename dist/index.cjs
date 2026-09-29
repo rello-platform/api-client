@@ -1754,15 +1754,21 @@ function createPlatformKeyValidator(config) {
     }
     await fetchInProgress;
   }
-  return async function validatePlatformCaller(request) {
+  const nullReasons = /* @__PURE__ */ new WeakMap();
+  function refuse(request, reason, withStatus) {
+    nullReasons.set(request, { reason, httpStatus: withStatus ? lastFetchHttpStatus : null });
+    return null;
+  }
+  const validatePlatformCaller = async function validatePlatformCaller2(request) {
+    nullReasons.delete(request);
     const authHeader = request.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) return null;
+    if (!authHeader?.startsWith("Bearer ")) return refuse(request, "no-bearer", false);
     const token = authHeader.slice(7);
-    if (!token) return null;
+    if (!token) return refuse(request, "no-bearer", false);
     const tokenHash = (0, import_crypto3.createHash)("sha256").update(token).digest("hex");
     await ensureFreshCache();
-    if (lastSuccessTime === 0) return null;
-    if (lastFetchStatus === "auth-refused") return null;
+    if (lastSuccessTime === 0) return refuse(request, "no-cache", true);
+    if (lastFetchStatus === "auth-refused") return refuse(request, "auth-refused", true);
     if (lastFetchStatus === "5xx" || lastFetchStatus === "4xx-other" || lastFetchStatus === "network" || lastFetchStatus === "timeout") {
       const staleAgeMs = Date.now() - lastSuccessTime;
       const capMs = cacheTtlMs + staleServeMaxMs;
@@ -1774,7 +1780,7 @@ function createPlatformKeyValidator(config) {
           );
           capExceedWarningEmitted = true;
         }
-        return null;
+        return refuse(request, "stale-cap-exceeded", true);
       }
       if (!staleServeWarningEmitted) {
         console.warn(
@@ -1784,7 +1790,7 @@ function createPlatformKeyValidator(config) {
       }
     }
     const match = keyCache.find((k) => k.keyHash === tokenHash);
-    if (!match) return null;
+    if (!match) return refuse(request, "no-key-match", false);
     void (async () => {
       try {
         await fetch(`${baseUrl}/api/v1/platform/service-keys/touch`, {
@@ -1809,6 +1815,9 @@ function createPlatformKeyValidator(config) {
       permissions: match.permissions
     };
   };
+  return Object.assign(validatePlatformCaller, {
+    reasonFor: (request) => nullReasons.get(request)
+  });
 }
 function callerHasPermission(caller, required) {
   if (caller.permissions.includes("*")) return true;
