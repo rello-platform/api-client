@@ -1,5 +1,45 @@
 # Changelog
 
+## v2.28.1 — 2026-09-29
+
+### Fixed — the key validator fails closed only on 401/403 (ruling D-83)
+
+`createPlatformKeyValidator` failed closed on **any** 4xx from the
+service-keys refresh, discarding a good key cache. At 2026-09-29T15:30:07Z a
+single edge 409 on Milo's refresh (the request never reached Rello's app,
+which logged no 4xx) made Milo refuse every inbound platform token for 5
+minutes: 165 refusals, 1 scheduled decision and 1 compose-now lost.
+
+- **401 / 403** → fail closed, as before. They are the only answers about our
+  credential; serving past them would mask credential drift.
+  `lastFetchStatus = "auth-refused"`.
+- **Any other 4xx** (409, 404, 429, 400, …) → stale-serve within the existing
+  `cacheTtlMs + staleServeMaxMs` cap, exactly like a 5xx.
+  `lastFetchStatus = "4xx-other"`, a value it shares with neither `5xx` nor
+  `auth-refused`.
+- No cache yet → still fail closed, whatever the status.
+- The stale-serve and cap warnings now name the real status:
+  `reason=upstream-4xx-other status=409`.
+
+### Added — `validator.reasonFor(request)`: why a call returned null
+
+Until now all six null returns were the same bare `null`, so a consumer could
+not tell "no key matched this token" from "the validator refused every token".
+Milo logged "did not match any active key" through the 2026-09-29 refusal
+episode, when the token did match the cached key.
+
+`createPlatformKeyValidator` now returns a `PlatformKeyValidator`: the same
+callable, plus `reasonFor(request)` →
+`{ reason: "no-bearer" | "no-key-match" | "auth-refused" | "no-cache" | "stale-cap-exceeded", httpStatus }`,
+or `undefined` when that request got a caller or was never validated. It is
+keyed by the Request object (a WeakMap), so concurrent requests never read each
+other's reason, and it never changes what the call returns. New exported
+types: `PlatformKeyValidator`, `ValidatorNullReason`, `ValidatorNullReport`.
+
+Additive and source-compatible: the returned value is still assignable to
+`(request: Request) => Promise<PlatformCaller | null>`. Consumers need only the
+pin bump; reading the reason is opt-in.
+
 ## v2.18.0 — 2026-05-13
 
 ### Added — `ServiceClient.propertyAutofill()` for SPEC-PE-PFP-PROPERTY-AUTOFILL

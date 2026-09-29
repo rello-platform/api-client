@@ -57,6 +57,9 @@ export {
   type PlatformKeyValidatorConfig,
   type PlatformCaller,
   type ServiceBearerGuardConfig,
+  type PlatformKeyValidator,
+  type ValidatorNullReason,
+  type ValidatorNullReport,
 } from "./platform-key-validator.js";
 
 // Deploy-time spoke→Rello permission self-check (outbound counterpart to the validator)

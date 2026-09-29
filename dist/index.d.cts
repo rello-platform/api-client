@@ -1955,9 +1955,13 @@ interface PlatformKeyValidatorConfig {
     /**
      * Maximum staleness window beyond TTL expiry during which the validator
      * will serve last-good cache when the upstream Rello service-keys endpoint
-     * returns 5xx, network error, or timeout. Past this window the validator
-     * fails closed (returns null on every inbound). 4xx responses always
-     * fail-closed (no stale-serve) to avoid masking credential drift.
+     * returns 5xx, a 4xx other than 401/403, network error, or timeout. Past
+     * this window the validator fails closed (returns null on every inbound).
+     * 401 and 403 always fail closed (no stale-serve): they are the only
+     * answers about OUR credential, and serving past them would mask credential
+     * drift. Any other 4xx (409, 404, 429, …) is an unknown from something
+     * between us and Rello — measured 2026-09-29: an edge 409 that never reached
+     * Rello's app — and is treated like a 5xx (since 2.28.1).
      *
      * Default: 1800000 (30 minutes). Total worst-case stale window =
      * cacheTtlMs + staleServeMaxMs (35 min default).
@@ -1978,7 +1982,35 @@ interface PlatformCaller {
     /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
     permissions: readonly (PermissionSlug | "*")[];
 }
-declare function createPlatformKeyValidator(config: PlatformKeyValidatorConfig): (request: Request) => Promise<PlatformCaller | null>;
+/**
+ * Why a validator call returned null (since 2.28.1).
+ *
+ * - `no-bearer`          — the request carried no `Authorization: Bearer <token>`.
+ * - `no-key-match`       — the cache is usable and no cached key hash matches the token.
+ * - `auth-refused`       — the last refresh got 401/403: every token is refused until a refresh succeeds.
+ * - `no-cache`           — no refresh has ever succeeded, so there is nothing to match against.
+ * - `stale-cap-exceeded` — upstream has been failing past `cacheTtlMs + staleServeMaxMs`.
+ *
+ * Only `no-key-match` and `no-bearer` are about the inbound token. The other
+ * three mean the validator refused every token, whatever it was.
+ */
+type ValidatorNullReason = "no-bearer" | "no-key-match" | "auth-refused" | "no-cache" | "stale-cap-exceeded";
+interface ValidatorNullReport {
+    reason: ValidatorNullReason;
+    /** HTTP status of the last failed key refresh, when the reason is a refusal and one is known; else null. */
+    httpStatus: number | null;
+}
+/**
+ * The validator returned by `createPlatformKeyValidator`: call it with the
+ * inbound Request, exactly as before. `reasonFor(request)` then reports why
+ * that same Request got null (undefined if it got a caller or was never
+ * validated). Read-only: it never changes what the call returns. Keyed by the
+ * Request object, so concurrent requests never see each other's reason.
+ */
+type PlatformKeyValidator = ((request: Request) => Promise<PlatformCaller | null>) & {
+    reasonFor(request: Request): ValidatorNullReport | undefined;
+};
+declare function createPlatformKeyValidator(config: PlatformKeyValidatorConfig): PlatformKeyValidator;
 /**
  * Returns true if the caller has the platform-wide wildcard permission
  * OR the specific required permission. Centralizes the wildcard-OR-specific
@@ -2561,4 +2593,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };

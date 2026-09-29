@@ -20,9 +20,13 @@ export interface PlatformKeyValidatorConfig {
   /**
    * Maximum staleness window beyond TTL expiry during which the validator
    * will serve last-good cache when the upstream Rello service-keys endpoint
-   * returns 5xx, network error, or timeout. Past this window the validator
-   * fails closed (returns null on every inbound). 4xx responses always
-   * fail-closed (no stale-serve) to avoid masking credential drift.
+   * returns 5xx, a 4xx other than 401/403, network error, or timeout. Past
+   * this window the validator fails closed (returns null on every inbound).
+   * 401 and 403 always fail closed (no stale-serve): they are the only
+   * answers about OUR credential, and serving past them would mask credential
+   * drift. Any other 4xx (409, 404, 429, …) is an unknown from something
+   * between us and Rello — measured 2026-09-29: an edge 409 that never reached
+   * Rello's app — and is treated like a 5xx (since 2.28.1).
    *
    * Default: 1800000 (30 minutes). Total worst-case stale window =
    * cacheTtlMs + staleServeMaxMs (35 min default).
@@ -58,6 +62,42 @@ export interface PlatformCaller {
 }
 
 /**
+ * Why a validator call returned null (since 2.28.1).
+ *
+ * - `no-bearer`          — the request carried no `Authorization: Bearer <token>`.
+ * - `no-key-match`       — the cache is usable and no cached key hash matches the token.
+ * - `auth-refused`       — the last refresh got 401/403: every token is refused until a refresh succeeds.
+ * - `no-cache`           — no refresh has ever succeeded, so there is nothing to match against.
+ * - `stale-cap-exceeded` — upstream has been failing past `cacheTtlMs + staleServeMaxMs`.
+ *
+ * Only `no-key-match` and `no-bearer` are about the inbound token. The other
+ * three mean the validator refused every token, whatever it was.
+ */
+export type ValidatorNullReason =
+  | "no-bearer"
+  | "no-key-match"
+  | "auth-refused"
+  | "no-cache"
+  | "stale-cap-exceeded";
+
+export interface ValidatorNullReport {
+  reason: ValidatorNullReason;
+  /** HTTP status of the last failed key refresh, when the reason is a refusal and one is known; else null. */
+  httpStatus: number | null;
+}
+
+/**
+ * The validator returned by `createPlatformKeyValidator`: call it with the
+ * inbound Request, exactly as before. `reasonFor(request)` then reports why
+ * that same Request got null (undefined if it got a caller or was never
+ * validated). Read-only: it never changes what the call returns. Keyed by the
+ * Request object, so concurrent requests never see each other's reason.
+ */
+export type PlatformKeyValidator = ((request: Request) => Promise<PlatformCaller | null>) & {
+  reasonFor(request: Request): ValidatorNullReport | undefined;
+};
+
+/**
  * Create a validator for inbound platform service-to-service calls.
  *
  * The returned function authenticates incoming requests by:
@@ -87,11 +127,14 @@ export interface PlatformCaller {
  *   }
  *   console.log(`Authenticated caller: ${caller.appSource}`);
  */
-type FetchStatus = "init" | "ok" | "5xx" | "4xx" | "network" | "timeout";
+// `auth-refused` = 401/403, the only answers about our credential (fail closed).
+// `4xx-other` = any other 4xx: an unknown, stale-served like 5xx. Each failure
+// class keeps its own value so a log or a branch can never confuse them.
+type FetchStatus = "init" | "ok" | "5xx" | "auth-refused" | "4xx-other" | "network" | "timeout";
 
 export function createPlatformKeyValidator(
   config: PlatformKeyValidatorConfig
-): (request: Request) => Promise<PlatformCaller | null> {
+): PlatformKeyValidator {
   const baseUrl = config.relloApiUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
   const targetApp = config.ownAppSlug.toUpperCase().replace(/-/g, "_");
   const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
@@ -105,6 +148,9 @@ export function createPlatformKeyValidator(
   // Used at the read site to compute staleness for stale-serve eligibility.
   let lastSuccessTime = 0;
   let lastFetchStatus: FetchStatus = "init";
+  // HTTP status of the last failed refresh (null for network/timeout/ok), so
+  // the stale-serve and cap warnings name the real status, not just its class.
+  let lastFetchHttpStatus: number | null = null;
   let staleServeWarningEmitted = false;
   let capExceedWarningEmitted = false;
   let fetchInProgress: Promise<void> | null = null;
@@ -113,7 +159,8 @@ export function createPlatformKeyValidator(
    * Fetch expected keys from Rello.
    * - 200 + valid body → replace cache, mark `ok`, reset emit-once flags.
    * - 5xx → leave cache untouched, mark `5xx` (read site stale-serves if cache populated).
-   * - 4xx → leave cache untouched, mark `4xx` (read site fail-closes — masks credential drift if served).
+   * - 401/403 → leave cache untouched, mark `auth-refused` (read site fail-closes — serving would mask credential drift).
+   * - Any other 4xx → leave cache untouched, mark `4xx-other` (read site stale-serves like 5xx — not an answer about our credential).
    * - Network error → mark `network`. Timeout → mark `timeout`. Both eligible for stale-serve.
    */
   async function refreshCache(): Promise<void> {
@@ -130,15 +177,21 @@ export function createPlatformKeyValidator(
       lastFetchTime = Date.now();
 
       if (!res.ok) {
+        lastFetchHttpStatus = res.status;
         if (res.status >= 500) {
           lastFetchStatus = "5xx";
           console.warn(
             `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (will stale-serve if cache populated)`
           );
-        } else {
-          lastFetchStatus = "4xx";
+        } else if (res.status === 401 || res.status === 403) {
+          lastFetchStatus = "auth-refused";
           console.warn(
-            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx — fail-closed; check RELLO_API_KEY for credential drift)`
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx auth refusal — fail-closed; check RELLO_API_KEY for credential drift)`
+          );
+        } else {
+          lastFetchStatus = "4xx-other";
+          console.warn(
+            `[platform-key-validator] Failed to fetch service keys: ${res.status} ${res.statusText} (4xx, not an answer about our credential — will stale-serve if cache populated)`
           );
         }
         return;
@@ -150,6 +203,7 @@ export function createPlatformKeyValidator(
       if (!Array.isArray(keys)) {
         // Treat malformed body as upstream failure — preserve cache, allow stale-serve.
         lastFetchStatus = "5xx";
+        lastFetchHttpStatus = null;
         console.warn("[platform-key-validator] Invalid response: keys is not an array (treating as 5xx)");
         return;
       }
@@ -168,11 +222,13 @@ export function createPlatformKeyValidator(
 
       lastSuccessTime = lastFetchTime;
       lastFetchStatus = "ok";
+      lastFetchHttpStatus = null;
       // Recovery — reset emit-once gates so future failures warn fresh.
       staleServeWarningEmitted = false;
       capExceedWarningEmitted = false;
     } catch (error) {
       lastFetchTime = Date.now();
+      lastFetchHttpStatus = null;
       if (error instanceof DOMException && error.name === "AbortError") {
         lastFetchStatus = "timeout";
         console.warn("[platform-key-validator] Rello request timed out (will stale-serve if cache populated)");
@@ -210,14 +266,24 @@ export function createPlatformKeyValidator(
    * Returns the caller's identity if the token matches a cached key hash,
    * or null if the token is missing, invalid, or not recognized.
    */
-  return async function validatePlatformCaller(
+  // Why each Request got null. A WeakMap keyed by the Request object, not a
+  // shared "last reason" field: concurrent requests must not read each
+  // other's reason, and entries go away with their requests.
+  const nullReasons = new WeakMap<Request, ValidatorNullReport>();
+  function refuse(request: Request, reason: ValidatorNullReason, withStatus: boolean): null {
+    nullReasons.set(request, { reason, httpStatus: withStatus ? lastFetchHttpStatus : null });
+    return null;
+  }
+
+  const validatePlatformCaller = async function validatePlatformCaller(
     request: Request
   ): Promise<PlatformCaller | null> {
+    nullReasons.delete(request);
     // Extract Bearer token
     const authHeader = request.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) return null;
+    if (!authHeader?.startsWith("Bearer ")) return refuse(request, "no-bearer", false);
     const token = authHeader.slice(7);
-    if (!token) return null;
+    if (!token) return refuse(request, "no-bearer", false);
 
     // Hash the token with SHA-256 (same algorithm Rello uses)
     const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -227,32 +293,36 @@ export function createPlatformKeyValidator(
 
     // Stale-serve decision tree.
     // Pre-first-success → fail-closed (no cache to serve). Same as v2.10.0.
-    if (lastSuccessTime === 0) return null;
+    if (lastSuccessTime === 0) return refuse(request, "no-cache", true);
 
-    // 4xx fetch failure → fail-closed (don't mask credential drift).
-    if (lastFetchStatus === "4xx") return null;
+    // 401/403 → fail-closed: the only answers about our credential, and
+    // serving past them would mask credential drift.
+    if (lastFetchStatus === "auth-refused") return refuse(request, "auth-refused", true);
 
-    // Upstream is degraded (5xx / network / timeout) and cache is populated:
-    // stale-serve up to cacheTtlMs + staleServeMaxMs since last success, then fail-closed.
+    // Upstream is degraded (5xx / other 4xx / network / timeout) and cache is
+    // populated: stale-serve up to cacheTtlMs + staleServeMaxMs since last
+    // success, then fail-closed.
     if (
       lastFetchStatus === "5xx" ||
+      lastFetchStatus === "4xx-other" ||
       lastFetchStatus === "network" ||
       lastFetchStatus === "timeout"
     ) {
       const staleAgeMs = Date.now() - lastSuccessTime;
       const capMs = cacheTtlMs + staleServeMaxMs;
+      const statusPart = lastFetchHttpStatus === null ? "" : ` status=${lastFetchHttpStatus}`;
       if (staleAgeMs > capMs) {
         if (!capExceedWarningEmitted) {
           console.warn(
-            `[platform-key-validator] WARN cache exceeded stale-serve cap age_ms=${staleAgeMs} capMs=${capMs} reason=upstream-${lastFetchStatus} — fail-closed until next successful refresh`
+            `[platform-key-validator] WARN cache exceeded stale-serve cap age_ms=${staleAgeMs} capMs=${capMs} reason=upstream-${lastFetchStatus}${statusPart} — fail-closed until next successful refresh`
           );
           capExceedWarningEmitted = true;
         }
-        return null;
+        return refuse(request, "stale-cap-exceeded", true);
       }
       if (!staleServeWarningEmitted) {
         console.warn(
-          `[platform-key-validator] WARN serving stale cache age_ms=${staleAgeMs} reason=upstream-${lastFetchStatus}`
+          `[platform-key-validator] WARN serving stale cache age_ms=${staleAgeMs} reason=upstream-${lastFetchStatus}${statusPart}`
         );
         staleServeWarningEmitted = true;
       }
@@ -260,7 +330,7 @@ export function createPlatformKeyValidator(
 
     // Find a matching key by hash
     const match = keyCache.find((k) => k.keyHash === tokenHash);
-    if (!match) return null;
+    if (!match) return refuse(request, "no-key-match", false);
 
     // Fire-and-forget bump of ApiKey.lastUsedAt on Rello — observational only,
     // never block auth on the write. Mirrors the legacy validateApiKey()
@@ -290,6 +360,10 @@ export function createPlatformKeyValidator(
       permissions: match.permissions,
     };
   };
+
+  return Object.assign(validatePlatformCaller, {
+    reasonFor: (request: Request): ValidatorNullReport | undefined => nullReasons.get(request),
+  });
 }
 
 /**
