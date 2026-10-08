@@ -56,6 +56,31 @@ export class LeadsResource {
     return unwrapLead(res);
   }
 
+  /**
+   * `create`, plus whether Rello INSERTED the lead or returned an existing one
+   * its dedupe matched (Rello's 201 envelope `{ lead, created }`). `create`
+   * drops `created`; a caller that must act differently on a returning lead —
+   * A-852 (D-395): Home Scout decides whether its own Harvest Home call is
+   * still owed — reads it here.
+   *
+   * `created` is `true` (inserted), `false` (an existing lead was returned) or
+   * `null` when the response did not say — an older Rello, or a bare Lead
+   * body. Unknown is never reported as an insert.
+   */
+  async createWithOutcome(
+    tenantId: string,
+    data: CreateLeadInput,
+  ): Promise<{ lead: Lead; created: boolean | null }> {
+    const res = await this.transport.post<unknown>("/leads", tenantId, data);
+    const payload = unwrapData<unknown>(res);
+    const created =
+      payload && typeof payload === "object" && "created" in payload &&
+      typeof (payload as { created: unknown }).created === "boolean"
+        ? (payload as { created: boolean }).created
+        : null;
+    return { lead: unwrapLead(res), created };
+  }
+
   async get(tenantId: string, id: string): Promise<Lead> {
     const res = await this.transport.get<unknown>(`/leads/${id}`, tenantId);
     return unwrapLead(res);
