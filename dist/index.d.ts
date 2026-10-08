@@ -351,6 +351,21 @@ declare class LeadsResource {
     private readonly transport;
     constructor(transport: Transport);
     create(tenantId: string, data: CreateLeadInput): Promise<Lead>;
+    /**
+     * `create`, plus whether Rello INSERTED the lead or returned an existing one
+     * its dedupe matched (Rello's 201 envelope `{ lead, created }`). `create`
+     * drops `created`; a caller that must act differently on a returning lead —
+     * A-852 (D-395): Home Scout decides whether its own Harvest Home call is
+     * still owed — reads it here.
+     *
+     * `created` is `true` (inserted), `false` (an existing lead was returned) or
+     * `null` when the response did not say — an older Rello, or a bare Lead
+     * body. Unknown is never reported as an insert.
+     */
+    createWithOutcome(tenantId: string, data: CreateLeadInput): Promise<{
+        lead: Lead;
+        created: boolean | null;
+    }>;
     get(tenantId: string, id: string): Promise<Lead>;
     update(tenantId: string, id: string, data: UpdateLeadInput): Promise<Lead>;
     /**

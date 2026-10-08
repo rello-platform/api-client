@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.29.0 — 2026-10-08
+
+### Added — `leads.createWithOutcome()`: whether Rello inserted the lead (A-852 / D-395)
+
+Rello's `POST /api/leads` answers `201 { lead, created }`, where `created` is
+`false` when its dedupe returned an EXISTING lead instead of inserting one.
+`leads.create()` unwraps the lead and drops `created`, so a spoke could not
+tell a new lead from a returning one. Home Scout needs exactly that to decide
+whether its own Harvest Home call is still owed for a returning visitor
+(Rates Agent 1, `261008-AGENT1-A852-HS.md` §2).
+
+- `leads.createWithOutcome(tenantId, data)` → `{ lead, created }`.
+- `created` is `true` (inserted), `false` (existing lead returned) or `null`
+  when the response did not say (an older Rello, a bare Lead body, a
+  non-boolean value). Unknown is never reported as an insert.
+- `leads.create()` is unchanged.
+
 ## v2.28.1 — 2026-09-29
 
 ### Fixed — the key validator fails closed only on 401/403 (ruling D-83)
