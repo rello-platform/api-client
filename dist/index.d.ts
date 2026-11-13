@@ -2207,7 +2207,7 @@ declare const provisionedAgentSchema: z.ZodObject<{
     lastName: z.ZodString;
     slug: z.ZodString;
     role: z.ZodString;
-    phone: z.ZodNullable<z.ZodString>;
+    phone: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     photoUrl: z.ZodOptional<z.ZodString>;
     bio: z.ZodOptional<z.ZodString>;
     title: z.ZodOptional<z.ZodString>;
@@ -2258,12 +2258,13 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
     tenant: z.ZodObject<{
         name: z.ZodString;
         slug: z.ZodString;
-        logoUrl: z.ZodNullable<z.ZodString>;
+        logoUrl: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         primaryColor: z.ZodNullable<z.ZodString>;
         physicalAddress: z.ZodNullable<z.ZodString>;
         applicationUrl: z.ZodNullable<z.ZodString>;
         type: z.ZodString;
         plan: z.ZodString;
+        billingOrigin: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$strip>;
     agents: z.ZodArray<z.ZodObject<{
         relloAgentId: z.ZodString;
@@ -2272,7 +2273,7 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
         lastName: z.ZodString;
         slug: z.ZodString;
         role: z.ZodString;
-        phone: z.ZodNullable<z.ZodString>;
+        phone: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         photoUrl: z.ZodOptional<z.ZodString>;
         bio: z.ZodOptional<z.ZodString>;
         title: z.ZodOptional<z.ZodString>;
@@ -2316,12 +2317,66 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
             answer: z.ZodUnknown;
         }, z.core.$strip>>>>;
     }, z.core.$strip>>;
+    planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
+        rev: z.ZodNumber;
+        grants: z.ZodArray<z.ZodString>;
+        planSlug: z.ZodString;
+    }, z.core.$strip>>>>;
+    cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
+        status: z.ZodEnum<{
+            ACTIVE: "ACTIVE";
+            TRIALING: "TRIALING";
+            PAST_DUE: "PAST_DUE";
+            CANCELED: "CANCELED";
+        }>;
+        quantity: z.ZodNumber;
+        trialEndsAt: z.ZodNullable<z.ZodString>;
+        canceledAt: z.ZodNullable<z.ZodString>;
+        occurredAt: z.ZodString;
+        seq: z.ZodNumber;
+        source: z.ZodEnum<{
+            plan: "plan";
+            addon: "addon";
+            both: "both";
+        }>;
+    }, z.core.$strip>>>>;
     creditAllocation: z.ZodOptional<z.ZodObject<{
         initialBalance: z.ZodOptional<z.ZodNumber>;
         poolSize: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 type TenantEnablePayload = z.infer<typeof tenantEnablePayloadSchema>;
+/**
+ * PFP Gateway §4.2 — a tenant's plan grants. `grants` holds feature slugs
+ * (`FEATURE_SLUGS` in @rello-platform/slugs); kept as plain strings here so a
+ * receiver on an older slugs release still parses a newer feature.
+ */
+declare const tenantPlanGrantsSchema: z.ZodObject<{
+    rev: z.ZodNumber;
+    grants: z.ZodArray<z.ZodString>;
+    planSlug: z.ZodString;
+}, z.core.$strip>;
+type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
+/** PFP Gateway §4.3 rule 3 — the effective Check Your Rate record. */
+declare const tenantCyrStateSchema: z.ZodObject<{
+    status: z.ZodEnum<{
+        ACTIVE: "ACTIVE";
+        TRIALING: "TRIALING";
+        PAST_DUE: "PAST_DUE";
+        CANCELED: "CANCELED";
+    }>;
+    quantity: z.ZodNumber;
+    trialEndsAt: z.ZodNullable<z.ZodString>;
+    canceledAt: z.ZodNullable<z.ZodString>;
+    occurredAt: z.ZodString;
+    seq: z.ZodNumber;
+    source: z.ZodEnum<{
+        plan: "plan";
+        addon: "addon";
+        both: "both";
+    }>;
+}, z.core.$strip>;
+type TenantCyrState = z.infer<typeof tenantCyrStateSchema>;
 declare const tenantDisablePayloadSchema: z.ZodObject<{
     action: z.ZodLiteral<"disable">;
     relloTenantId: z.ZodString;
@@ -2334,12 +2389,13 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
     tenant: z.ZodObject<{
         name: z.ZodString;
         slug: z.ZodString;
-        logoUrl: z.ZodNullable<z.ZodString>;
+        logoUrl: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         primaryColor: z.ZodNullable<z.ZodString>;
         physicalAddress: z.ZodNullable<z.ZodString>;
         applicationUrl: z.ZodNullable<z.ZodString>;
         type: z.ZodString;
         plan: z.ZodString;
+        billingOrigin: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$strip>;
     agents: z.ZodArray<z.ZodObject<{
         relloAgentId: z.ZodString;
@@ -2348,7 +2404,7 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
         lastName: z.ZodString;
         slug: z.ZodString;
         role: z.ZodString;
-        phone: z.ZodNullable<z.ZodString>;
+        phone: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         photoUrl: z.ZodOptional<z.ZodString>;
         bio: z.ZodOptional<z.ZodString>;
         title: z.ZodOptional<z.ZodString>;
@@ -2392,6 +2448,29 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
             answer: z.ZodUnknown;
         }, z.core.$strip>>>>;
     }, z.core.$strip>>;
+    planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
+        rev: z.ZodNumber;
+        grants: z.ZodArray<z.ZodString>;
+        planSlug: z.ZodString;
+    }, z.core.$strip>>>>;
+    cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
+        status: z.ZodEnum<{
+            ACTIVE: "ACTIVE";
+            TRIALING: "TRIALING";
+            PAST_DUE: "PAST_DUE";
+            CANCELED: "CANCELED";
+        }>;
+        quantity: z.ZodNumber;
+        trialEndsAt: z.ZodNullable<z.ZodString>;
+        canceledAt: z.ZodNullable<z.ZodString>;
+        occurredAt: z.ZodString;
+        seq: z.ZodNumber;
+        source: z.ZodEnum<{
+            plan: "plan";
+            addon: "addon";
+            both: "both";
+        }>;
+    }, z.core.$strip>>>>;
     creditAllocation: z.ZodOptional<z.ZodObject<{
         initialBalance: z.ZodOptional<z.ZodNumber>;
         poolSize: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
@@ -2416,7 +2495,7 @@ declare const agentProvisionPayloadSchema: z.ZodObject<{
         lastName: z.ZodString;
         slug: z.ZodString;
         role: z.ZodString;
-        phone: z.ZodNullable<z.ZodString>;
+        phone: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         photoUrl: z.ZodOptional<z.ZodString>;
         bio: z.ZodOptional<z.ZodString>;
         title: z.ZodOptional<z.ZodString>;
@@ -2593,4 +2672,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantDisablePayload, type TenantEnablePayload, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };

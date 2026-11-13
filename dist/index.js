@@ -1928,7 +1928,9 @@ var provisionedAgentSchema = z.object({
   slug: z.string(),
   role: z.string(),
   // "MLO" | "BROKER" | "AGENT" — kept as string for forward-compat
-  phone: z.string().nullable(),
+  // Rello omits an empty phone on the enable push (PFP Gateway A-195); other
+  // senders still send null. Accept all three.
+  phone: z.string().nullable().optional(),
   // Optional profile fields — present when the agent has filled them in
   photoUrl: z.string().optional(),
   bio: z.string().optional(),
@@ -1959,16 +1961,28 @@ var tenantEnablePayloadSchema = z.object({
   tenant: z.object({
     name: z.string(),
     slug: z.string(),
-    logoUrl: z.string().nullable(),
+    // Omitted on Rello's enable push when the tenant has no logo (A-195).
+    logoUrl: z.string().nullable().optional(),
     primaryColor: z.string().nullable(),
     physicalAddress: z.string().nullable(),
     applicationUrl: z.string().nullable(),
     type: z.string(),
     // Rello TenantType enum
-    plan: z.string()
+    plan: z.string(),
     // Rello Plan enum
+    // PFP Gateway §4.2 (G-2): "pfp-gateway" for a tenant created by a PFP
+    // gateway checkout; null for every other tenant. Sticky once set.
+    billingOrigin: z.string().nullable().optional()
   }),
   agents: z.array(provisionedAgentSchema),
+  // PFP Gateway §4.2 (G-2): the tenant's plan grants, from Rello's
+  // TenantPlanGrantState. null when the tenant has no grant state. A receiver
+  // applies it only when `rev` is newer than the one it holds.
+  planGrants: z.lazy(() => tenantPlanGrantsSchema).nullable().optional(),
+  // PFP Gateway §4.2 / §4.3 [A-14] (G-2): the effective Check Your Rate record,
+  // the same fields as `billing.addon_changed`. null when the tenant never
+  // held it. A receiver applies it only when strictly newer (seq, else occurredAt).
+  cyr: z.lazy(() => tenantCyrStateSchema).nullable().optional(),
   // HH-specific: initial credit grant for new tenants. Optional — only
   // sent when the spoke app has a credit system (currently only HH).
   // Spokes without credits ignore this field.
@@ -1976,6 +1990,24 @@ var tenantEnablePayloadSchema = z.object({
     initialBalance: z.number().optional(),
     poolSize: z.number().nullable().optional()
   }).optional()
+});
+var tenantPlanGrantsSchema = z.object({
+  /** Strictly increasing per tenant; Rello's TenantPlanGrantState.rev. */
+  rev: z.number().int().nonnegative(),
+  grants: z.array(z.string()),
+  planSlug: z.string()
+});
+var tenantCyrStateSchema = z.object({
+  status: z.enum(["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]),
+  quantity: z.number().int().nonnegative(),
+  trialEndsAt: z.string().nullable(),
+  canceledAt: z.string().nullable(),
+  /** ISO with milliseconds. */
+  occurredAt: z.string(),
+  /** Strictly increasing integer per (tenant, feature). */
+  seq: z.number().int().nonnegative(),
+  /** Display only; never used to decide serving. */
+  source: z.enum(["addon", "plan", "both"])
 });
 var tenantDisablePayloadSchema = z.object({
   action: z.literal("disable"),
@@ -2082,8 +2114,10 @@ export {
   provisionedAgentSchema,
   resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck,
+  tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,
+  tenantPlanGrantsSchema,
   tenantProvisioningPayloadSchema
 };
 //# sourceMappingURL=index.js.map

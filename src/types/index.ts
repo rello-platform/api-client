@@ -101,6 +101,8 @@ export type {
 export type {
   ProvisionedAgent,
   TenantEnablePayload,
+  TenantPlanGrants,
+  TenantCyrState,
   TenantDisablePayload,
   TenantProvisioningPayload,
   AgentProvisionPayload,
@@ -147,6 +149,8 @@ export { PROPERTY_AUTOFILL_FIELD_KEYS } from "./property-autofill.js";
 export {
   provisionedAgentSchema,
   tenantEnablePayloadSchema,
+  tenantPlanGrantsSchema,
+  tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantProvisioningPayloadSchema,
   agentProvisionPayloadSchema,

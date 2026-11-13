@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.29.0 — 2026-11-13
+
+### Added — gateway fields on the tenant enable payload (PFP Gateway G-2, §4.2)
+
+`tenantEnablePayloadSchema` stripped unknown keys, so Rello could not send
+PFP the gateway state it needs at tenant create. Three optional fields:
+
+- `tenant.billingOrigin: string | null`: `"pfp-gateway"` for a tenant a PFP
+  gateway checkout created, null otherwise.
+- `planGrants: { rev, grants, planSlug } | null` (`tenantPlanGrantsSchema`,
+  type `TenantPlanGrants`). `rev` is a non-negative integer, `grants` is plain
+  strings (feature slugs from `@rello-platform/slugs` `FEATURE_SLUGS`, kept
+  as strings so an older slugs release still parses a newer feature).
+- `cyr: { status, quantity, trialEndsAt, canceledAt, occurredAt, seq, source } | null`
+  (`tenantCyrStateSchema`, type `TenantCyrState`): the effective Check Your
+  Rate record, the same fields as `billing.addon_changed` (§4.3 rule 3).
+
+All are optional, so a payload from an older sender parses as before.
+
+### Changed — `phone` and `tenant.logoUrl` may be absent (A-195)
+
+Rello's enable push now omits an empty agent phone and an empty tenant logo
+instead of sending null. The schema accepts absent, null or a string for
+both. Parsing is strictly more permissive. The inferred type gains `?` on
+the two keys: a consumer that compared them `=== null` should treat
+`undefined` the same.
+
 ## v2.28.1 — 2026-09-29
 
 ### Fixed — the key validator fails closed only on 401/403 (ruling D-83)

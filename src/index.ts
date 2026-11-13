@@ -141,6 +141,8 @@ export type {
   ReportIngestInput,
   ProvisionedAgent,
   TenantEnablePayload,
+  TenantPlanGrants,
+  TenantCyrState,
   TenantDisablePayload,
   TenantProvisioningPayload,
   AgentProvisionPayload,
@@ -176,6 +178,8 @@ export { PROPERTY_AUTOFILL_FIELD_KEYS } from "./types/index.js";
 export {
   provisionedAgentSchema,
   tenantEnablePayloadSchema,
+  tenantPlanGrantsSchema,
+  tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantProvisioningPayloadSchema,
   agentProvisionPayloadSchema,
