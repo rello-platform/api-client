@@ -33,6 +33,7 @@ function basePayload() {
 
 const GRANTS = { rev: 1, grants: ["pfp-rates"], planSlug: "pfp-rates" };
 const CYR = {
+  featureSlug: "check-your-rate",
   status: "TRIALING",
   quantity: 1,
   trialEndsAt: "2026-12-01T00:00:00.000Z",
@@ -135,5 +136,40 @@ test("cyr refuses a malformed record", () => {
   }
   for (const status of ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]) {
     assert.equal(tenantCyrStateSchema.safeParse({ ...CYR, status }).success, true);
+  }
+});
+
+// GD-1601 (PLATFORM AUDIT 97): the body Rello's R1 sends (cyr-entitlement.ts,
+// billing.addon_changed) names eight fields — featureSlug among them — plus four
+// extras. All eight must survive the parse; the four extras are accepted and
+// dropped (the schema stays non-strict, GD-1582).
+const R1_EVENT = {
+  seq: 1,
+  cause: "addon.start",
+  source: "addon",
+  status: "TRIALING",
+  addOnId: "addon_1",
+  quantity: 1,
+  canceledAt: null,
+  occurredAt: "2026-11-13T23:15:56.124Z",
+  featureSlug: "check-your-rate",
+  trialEndsAt: "2026-11-27T23:15:56.000Z",
+  tenantAddOnId: "tao_1",
+  previousStatus: null,
+};
+const EIGHT = ["featureSlug", "status", "quantity", "trialEndsAt", "canceledAt", "occurredAt", "seq", "source"];
+
+test("GD-1601: R1's billing.addon_changed body keeps all eight named fields, featureSlug included", () => {
+  const got = tenantCyrStateSchema.parse(R1_EVENT);
+  for (const key of EIGHT) assert.deepEqual(got[key], R1_EVENT[key], `${key} must survive`);
+  assert.deepEqual(Object.keys(got).sort(), [...EIGHT].sort(), "the four extras are dropped, nothing else");
+  const viaEnable = tenantEnablePayloadSchema.parse({ ...basePayload(), cyr: R1_EVENT });
+  assert.equal(viaEnable.cyr.featureSlug, "check-your-rate");
+});
+
+test("GD-1601: cyr refuses a missing or empty featureSlug", () => {
+  const { featureSlug, ...noSlug } = R1_EVENT;
+  for (const bad of [noSlug, { ...R1_EVENT, featureSlug: "" }, { ...R1_EVENT, featureSlug: null }, { ...R1_EVENT, featureSlug: 7 }]) {
+    assert.equal(tenantCyrStateSchema.safeParse(bad).success, false, JSON.stringify(bad));
   }
 });

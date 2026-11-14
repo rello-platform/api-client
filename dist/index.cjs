@@ -2062,6 +2062,8 @@ var tenantPlanGrantsSchema = import_zod.z.object({
   planSlug: import_zod.z.string()
 });
 var tenantCyrStateSchema = import_zod.z.object({
+  /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
+  featureSlug: import_zod.z.string().min(1),
   status: import_zod.z.enum(["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]),
   quantity: import_zod.z.number().int().nonnegative(),
   trialEndsAt: import_zod.z.string().nullable(),

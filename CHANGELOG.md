@@ -13,9 +13,12 @@ PFP the gateway state it needs at tenant create. Three optional fields:
   type `TenantPlanGrants`). `rev` is a non-negative integer, `grants` is plain
   strings (feature slugs from `@rello-platform/slugs` `FEATURE_SLUGS`, kept
   as strings so an older slugs release still parses a newer feature).
-- `cyr: { status, quantity, trialEndsAt, canceledAt, occurredAt, seq, source } | null`
+- `cyr: { featureSlug, status, quantity, trialEndsAt, canceledAt, occurredAt, seq, source } | null`
   (`tenantCyrStateSchema`, type `TenantCyrState`): the effective Check Your
-  Rate record, the same fields as `billing.addon_changed` (§4.3 rule 3).
+  Rate record, the eight named fields of `billing.addon_changed` (§4.3 rule 3).
+  `featureSlug` is a non-empty string. The schema is not strict: the event's
+  other keys (`previousStatus`, `addOnId`, `tenantAddOnId`, `cause`) are
+  accepted and dropped.
 
 All are optional, so a payload from an older sender parses as before.
 

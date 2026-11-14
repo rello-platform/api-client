@@ -123,8 +123,15 @@ export const tenantPlanGrantsSchema = z.object({
 
 export type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
 
-/** PFP Gateway §4.3 rule 3 — the effective Check Your Rate record. */
+/**
+ * PFP Gateway §4.3 rule 3 — the effective Check Your Rate record: the eight
+ * named fields of `billing.addon_changed`. Non-strict on purpose (GD-1582): the
+ * event's other keys (previousStatus, addOnId, tenantAddOnId, cause) are
+ * accepted and dropped.
+ */
 export const tenantCyrStateSchema = z.object({
+  /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
+  featureSlug: z.string().min(1),
   status: z.enum(["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]),
   quantity: z.number().int().nonnegative(),
   trialEndsAt: z.string().nullable(),

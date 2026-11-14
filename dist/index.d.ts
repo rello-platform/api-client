@@ -2323,6 +2323,7 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
         planSlug: z.ZodString;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
+        featureSlug: z.ZodString;
         status: z.ZodEnum<{
             ACTIVE: "ACTIVE";
             TRIALING: "TRIALING";
@@ -2357,8 +2358,14 @@ declare const tenantPlanGrantsSchema: z.ZodObject<{
     planSlug: z.ZodString;
 }, z.core.$strip>;
 type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
-/** PFP Gateway §4.3 rule 3 — the effective Check Your Rate record. */
+/**
+ * PFP Gateway §4.3 rule 3 — the effective Check Your Rate record: the eight
+ * named fields of `billing.addon_changed`. Non-strict on purpose (GD-1582): the
+ * event's other keys (previousStatus, addOnId, tenantAddOnId, cause) are
+ * accepted and dropped.
+ */
 declare const tenantCyrStateSchema: z.ZodObject<{
+    featureSlug: z.ZodString;
     status: z.ZodEnum<{
         ACTIVE: "ACTIVE";
         TRIALING: "TRIALING";
@@ -2454,6 +2461,7 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
         planSlug: z.ZodString;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
+        featureSlug: z.ZodString;
         status: z.ZodEnum<{
             ACTIVE: "ACTIVE";
             TRIALING: "TRIALING";

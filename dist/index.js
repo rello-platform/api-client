@@ -1998,6 +1998,8 @@ var tenantPlanGrantsSchema = z.object({
   planSlug: z.string()
 });
 var tenantCyrStateSchema = z.object({
+  /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
+  featureSlug: z.string().min(1),
   status: z.enum(["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]),
   quantity: z.number().int().nonnegative(),
   trialEndsAt: z.string().nullable(),
