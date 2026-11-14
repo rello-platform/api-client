@@ -1,6 +1,10 @@
 # Changelog
 
-## v2.29.0 — 2026-11-13
+## v2.30.0 — 2026-11-13
+
+Version note: api-client #10 (`createWithOutcome`) also claimed 2.29.0; this
+release is 2.30.0 whatever the merge order (Platform KA ruling, 1087), so
+2.29.0 belongs to #10 alone.
 
 ### Added — gateway fields on the tenant enable payload (PFP Gateway G-2, §4.2)
 
