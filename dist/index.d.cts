@@ -2250,6 +2250,8 @@ declare const provisionedAgentSchema: z.ZodObject<{
         question: z.ZodString;
         answer: z.ZodUnknown;
     }, z.core.$strip>>>>;
+    hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
+    isTenantOwner: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 type ProvisionedAgent = z.infer<typeof provisionedAgentSchema>;
 declare const tenantEnablePayloadSchema: z.ZodObject<{
@@ -2316,6 +2318,8 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
             question: z.ZodString;
             answer: z.ZodUnknown;
         }, z.core.$strip>>>>;
+        hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
+        isTenantOwner: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
     planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         rev: z.ZodNumber;
@@ -2454,6 +2458,8 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
             question: z.ZodString;
             answer: z.ZodUnknown;
         }, z.core.$strip>>>>;
+        hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
+        isTenantOwner: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
     planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         rev: z.ZodNumber;
@@ -2546,6 +2552,8 @@ declare const agentProvisionPayloadSchema: z.ZodObject<{
             question: z.ZodString;
             answer: z.ZodUnknown;
         }, z.core.$strip>>>>;
+        hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
+        isTenantOwner: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>;
     agentProfile: z.ZodOptional<z.ZodObject<{
         specialtySentence: z.ZodOptional<z.ZodString>;

@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.31.0 — 2026-11-14
+
+Version note: api-client #10 (`createWithOutcome`) claims 2.29.0, which
+belongs to it alone (Platform KA ruling 1087). This release is built on
+v2.30.0's main and does NOT contain #10's change; if #10 merges later, its
+2.29.0 tag will be lower than this one and will not contain v2.30.0/v2.31.0.
+
+### Added — per-agent link and owner flags on the provisioned agent (PFP Gateway G-6a-pre)
+
+`provisionedAgentSchema` is a plain `z.object`, which strips unknown keys,
+and Rello sends the parsed payload, so it could not tell a spoke whether an
+agent can own leads or which agent owns the tenant. Two optional booleans:
+
+- `hasLinkedUser: boolean`: the Rello Agent has a linked User. Home Scout's
+  page editor uses it to tell an owner a loan officer needs a Rello login
+  before their page can own leads (a setup message, never a hold).
+- `isTenantOwner: boolean`: the agent's linked User holds an owner role.
+  PathfinderPro uses it to set the account's shared rate source at write time.
+
+Both are optional: absent means the sender did not say (never false), and a
+payload without them parses exactly as at v2.30.0. The schema still strips
+any key it does not name. The fields ride on `agentProvisionPayloadSchema`
+too, since it shares the agent schema; Rello does not send them there.
+
 ## v2.30.0 — 2026-11-13
 
 Version note: api-client #10 (`createWithOutcome`) also claimed 2.29.0; this

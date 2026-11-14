@@ -64,6 +64,16 @@ export const provisionedAgentSchema = z.object({
   // tenant-enable (bulk) — per-agent provision carries these at the top level.
   agentProfile: z.lazy(() => agentProfileSchema).optional(),
   wizardAnswers: z.array(z.lazy(() => wizardAnswerSchema)).optional(),
+
+  // PFP Gateway G-6a-pre (spec §G-8 (a) [B8, K-178]; KA prompts 1105/1106).
+  // Optional: absent means the sender did not say, never false.
+  // hasLinkedUser — the Rello Agent has a linked User (Agent.userId set).
+  //   Home Scout's page editor uses it to say a loan officer needs a Rello
+  //   login before their page can own leads. A setup message, never a hold.
+  hasLinkedUser: z.boolean().optional(),
+  // isTenantOwner — the agent's linked User holds an owner role. PathfinderPro
+  //   uses it to pick the account's shared rate source at write time.
+  isTenantOwner: z.boolean().optional(),
 });
 
 export type ProvisionedAgent = z.infer<typeof provisionedAgentSchema>;
