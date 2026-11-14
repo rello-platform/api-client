@@ -1,11 +1,37 @@
 # Changelog
 
-## v2.31.0 — 2026-11-14
+Version rule for api-client #10 (`createWithOutcome`): its branch still says
+2.29.0, but #10 takes the next free version when it merges (2.33.0 after
+v2.32.0), built on top of main, so its tag contains every earlier release.
+(Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
+AUDIT 99.)
 
-Version note: api-client #10 (`createWithOutcome`) claims 2.29.0, which
-belongs to it alone (Platform KA ruling 1087). This release is built on
-v2.30.0's main and does NOT contain #10's change; if #10 merges later, its
-2.29.0 tag will be lower than this one and will not contain v2.30.0/v2.31.0.
+## v2.32.0 — 2026-11-14
+
+### Changed — the package's own `@rello-platform/permissions` re-pinned v0.54.0 → v0.60.0
+
+`createServiceBearerGuard`, `callerHasPermission` and `PlatformCaller` are
+typed against `PermissionSlug` from api-client's OWN dependency. At v2.31.0
+that was permissions v0.54.0, so a consumer route passing a newer slug failed
+tsc even after the consumer bumped its top-level permissions: npm nests the
+older copy under api-client and the guard keeps its union. Home Scout's
+`POST /api/internal/rate-check/price` passing `"rate-check:price"`
+(permissions v0.60.0; PFP Gateway G-RC, spec rev 10.20 §4.12d item 4) hit
+TS2322 (Platform AUDIT 99, prompt 1118).
+
+The pin is now `github:rello-platform/permissions#v0.60.0` (resolved
+`2a2b0159`), so the guard's union includes `rate-check:price`,
+`agents:contact:write` (v0.59.0) and `billing:plan-grants:read` (v0.58.0).
+Runtime behaviour is unchanged: the guard still refuses a key without the
+required permission (403 `PERMISSION_DENIED`). A consumer typing a permission
+must keep its own permissions pin at or above this one.
+
+Test: `tests/permissions-repin-rate-check-price.test.mjs` type-checks
+`tests/types/rate-check-price.fixture.ts` against the built `dist/` with the
+TypeScript API (red at v2.31.0: TS2322 and TS2345), plus a runtime refusal and
+a runtime pass for `rate-check:price`.
+
+## v2.31.0 — 2026-11-14
 
 ### Added — per-agent link and owner flags on the provisioned agent (PFP Gateway G-6a-pre)
 
