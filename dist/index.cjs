@@ -54,8 +54,10 @@ __export(index_exports, {
   provisionedAgentSchema: () => provisionedAgentSchema,
   resetImplicitApiKeyUses: () => resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck: () => runRelloPermissionSelfCheck,
+  tenantCyrStateSchema: () => tenantCyrStateSchema,
   tenantDisablePayloadSchema: () => tenantDisablePayloadSchema,
   tenantEnablePayloadSchema: () => tenantEnablePayloadSchema,
+  tenantPlanGrantsSchema: () => tenantPlanGrantsSchema,
   tenantProvisioningPayloadSchema: () => tenantProvisioningPayloadSchema
 });
 module.exports = __toCommonJS(index_exports);
@@ -1990,7 +1992,9 @@ var provisionedAgentSchema = import_zod.z.object({
   slug: import_zod.z.string(),
   role: import_zod.z.string(),
   // "MLO" | "BROKER" | "AGENT" — kept as string for forward-compat
-  phone: import_zod.z.string().nullable(),
+  // Rello omits an empty phone on the enable push (PFP Gateway A-195); other
+  // senders still send null. Accept all three.
+  phone: import_zod.z.string().nullable().optional(),
   // Optional profile fields — present when the agent has filled them in
   photoUrl: import_zod.z.string().optional(),
   bio: import_zod.z.string().optional(),
@@ -2021,16 +2025,28 @@ var tenantEnablePayloadSchema = import_zod.z.object({
   tenant: import_zod.z.object({
     name: import_zod.z.string(),
     slug: import_zod.z.string(),
-    logoUrl: import_zod.z.string().nullable(),
+    // Omitted on Rello's enable push when the tenant has no logo (A-195).
+    logoUrl: import_zod.z.string().nullable().optional(),
     primaryColor: import_zod.z.string().nullable(),
     physicalAddress: import_zod.z.string().nullable(),
     applicationUrl: import_zod.z.string().nullable(),
     type: import_zod.z.string(),
     // Rello TenantType enum
-    plan: import_zod.z.string()
+    plan: import_zod.z.string(),
     // Rello Plan enum
+    // PFP Gateway §4.2 (G-2): "pfp-gateway" for a tenant created by a PFP
+    // gateway checkout; null for every other tenant. Sticky once set.
+    billingOrigin: import_zod.z.string().nullable().optional()
   }),
   agents: import_zod.z.array(provisionedAgentSchema),
+  // PFP Gateway §4.2 (G-2): the tenant's plan grants, from Rello's
+  // TenantPlanGrantState. null when the tenant has no grant state. A receiver
+  // applies it only when `rev` is newer than the one it holds.
+  planGrants: import_zod.z.lazy(() => tenantPlanGrantsSchema).nullable().optional(),
+  // PFP Gateway §4.2 / §4.3 [A-14] (G-2): the effective Check Your Rate record,
+  // the same fields as `billing.addon_changed`. null when the tenant never
+  // held it. A receiver applies it only when strictly newer (seq, else occurredAt).
+  cyr: import_zod.z.lazy(() => tenantCyrStateSchema).nullable().optional(),
   // HH-specific: initial credit grant for new tenants. Optional — only
   // sent when the spoke app has a credit system (currently only HH).
   // Spokes without credits ignore this field.
@@ -2038,6 +2054,26 @@ var tenantEnablePayloadSchema = import_zod.z.object({
     initialBalance: import_zod.z.number().optional(),
     poolSize: import_zod.z.number().nullable().optional()
   }).optional()
+});
+var tenantPlanGrantsSchema = import_zod.z.object({
+  /** Strictly increasing per tenant; Rello's TenantPlanGrantState.rev. */
+  rev: import_zod.z.number().int().nonnegative(),
+  grants: import_zod.z.array(import_zod.z.string()),
+  planSlug: import_zod.z.string()
+});
+var tenantCyrStateSchema = import_zod.z.object({
+  /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
+  featureSlug: import_zod.z.string().min(1),
+  status: import_zod.z.enum(["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]),
+  quantity: import_zod.z.number().int().nonnegative(),
+  trialEndsAt: import_zod.z.string().nullable(),
+  canceledAt: import_zod.z.string().nullable(),
+  /** ISO with milliseconds. */
+  occurredAt: import_zod.z.string(),
+  /** Strictly increasing integer per (tenant, feature). */
+  seq: import_zod.z.number().int().nonnegative(),
+  /** Display only; never used to decide serving. */
+  source: import_zod.z.enum(["addon", "plan", "both"])
 });
 var tenantDisablePayloadSchema = import_zod.z.object({
   action: import_zod.z.literal("disable"),
@@ -2145,8 +2181,10 @@ function createServiceClient(config) {
   provisionedAgentSchema,
   resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck,
+  tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,
+  tenantPlanGrantsSchema,
   tenantProvisioningPayloadSchema
 });
 //# sourceMappingURL=index.cjs.map
