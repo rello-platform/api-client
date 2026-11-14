@@ -19,6 +19,15 @@ agent can own leads or which agent owns the tenant. Two optional booleans:
 - `isTenantOwner: boolean`: the agent's linked User holds an owner role.
   PathfinderPro uses it to set the account's shared rate source at write time.
 
+### Changed — `planGrants.planSlug` may be null (KA ruling G-15)
+
+A cancelled tenant's plan-grant state is `grants: []` with `planSlug: null`.
+At v2.30.0 `planSlug` was `z.string()`, so Rello's push parse would refuse the
+whole enable body. It is now `z.string().nullable()` and stays a required key.
+A string `planSlug` parses exactly as before; the inferred type gains `| null`.
+
+### Notes on the agent flags
+
 Both are optional: absent means the sender did not say (never false), and a
 payload without them parses exactly as at v2.30.0. The schema still strips
 any key it does not name. The fields ride on `agentProvisionPayloadSchema`

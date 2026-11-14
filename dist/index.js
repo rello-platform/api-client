@@ -2004,7 +2004,9 @@ var tenantPlanGrantsSchema = z.object({
   /** Strictly increasing per tenant; Rello's TenantPlanGrantState.rev. */
   rev: z.number().int().nonnegative(),
   grants: z.array(z.string()),
-  planSlug: z.string()
+  // Null for a tenant with no plan (a cancelled tenant: grants [] and planSlug
+  // null; KA ruling G-15). Still a required key.
+  planSlug: z.string().nullable()
 });
 var tenantCyrStateSchema = z.object({
   /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */

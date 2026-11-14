@@ -2324,7 +2324,7 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
     planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         rev: z.ZodNumber;
         grants: z.ZodArray<z.ZodString>;
-        planSlug: z.ZodString;
+        planSlug: z.ZodNullable<z.ZodString>;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         featureSlug: z.ZodString;
@@ -2359,7 +2359,7 @@ type TenantEnablePayload = z.infer<typeof tenantEnablePayloadSchema>;
 declare const tenantPlanGrantsSchema: z.ZodObject<{
     rev: z.ZodNumber;
     grants: z.ZodArray<z.ZodString>;
-    planSlug: z.ZodString;
+    planSlug: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;
 type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
 /**
@@ -2464,7 +2464,7 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
     planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         rev: z.ZodNumber;
         grants: z.ZodArray<z.ZodString>;
-        planSlug: z.ZodString;
+        planSlug: z.ZodNullable<z.ZodString>;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         featureSlug: z.ZodString;
