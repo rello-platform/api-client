@@ -26,6 +26,19 @@ At v2.30.0 `planSlug` was `z.string()`, so Rello's push parse would refuse the
 whole enable body. It is now `z.string().nullable()` and stays a required key.
 A string `planSlug` parses exactly as before; the inferred type gains `| null`.
 
+### Added — optional `cause` on `planGrants` and on the `cyr` block (KA amendment 1109)
+
+`tenantPlanGrantsSchema` and `tenantCyrStateSchema` each gain
+`cause: z.string().optional()`. `"plan_change"` means the grant set (or Check
+Your Rate record) changed because of a plan switch; absent means any other
+change. Read it as `cause === "plan_change"`, never as "present", because the
+cyr block's source event, `billing.addon_changed`, may carry other cause values.
+It is a plain string, not an enum, so a later value never makes an older
+receiver refuse the push. At v2.30.0 `cause` was dropped from the cyr block, as
+GD-1582 recorded; it is now kept. `previousStatus`, `addOnId` and
+`tenantAddOnId` are still accepted and dropped. A body without `cause` parses
+exactly as at v2.30.0.
+
 ### Notes on the agent flags
 
 Both are optional: absent means the sender did not say (never false), and a

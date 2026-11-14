@@ -2325,6 +2325,7 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
         rev: z.ZodNumber;
         grants: z.ZodArray<z.ZodString>;
         planSlug: z.ZodNullable<z.ZodString>;
+        cause: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         featureSlug: z.ZodString;
@@ -2344,6 +2345,7 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
             addon: "addon";
             both: "both";
         }>;
+        cause: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     creditAllocation: z.ZodOptional<z.ZodObject<{
         initialBalance: z.ZodOptional<z.ZodNumber>;
@@ -2360,13 +2362,15 @@ declare const tenantPlanGrantsSchema: z.ZodObject<{
     rev: z.ZodNumber;
     grants: z.ZodArray<z.ZodString>;
     planSlug: z.ZodNullable<z.ZodString>;
+    cause: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
 /**
  * PFP Gateway §4.3 rule 3 — the effective Check Your Rate record: the eight
  * named fields of `billing.addon_changed`. Non-strict on purpose (GD-1582): the
- * event's other keys (previousStatus, addOnId, tenantAddOnId, cause) are
- * accepted and dropped.
+ * event's other keys (previousStatus, addOnId, tenantAddOnId) are accepted and
+ * dropped. `cause` is kept (KA amendment 1109): plan_change = this record
+ * changed because of a plan switch; absent = any other change.
  */
 declare const tenantCyrStateSchema: z.ZodObject<{
     featureSlug: z.ZodString;
@@ -2386,6 +2390,7 @@ declare const tenantCyrStateSchema: z.ZodObject<{
         addon: "addon";
         both: "both";
     }>;
+    cause: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 type TenantCyrState = z.infer<typeof tenantCyrStateSchema>;
 declare const tenantDisablePayloadSchema: z.ZodObject<{
@@ -2465,6 +2470,7 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
         rev: z.ZodNumber;
         grants: z.ZodArray<z.ZodString>;
         planSlug: z.ZodNullable<z.ZodString>;
+        cause: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         featureSlug: z.ZodString;
@@ -2484,6 +2490,7 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
             addon: "addon";
             both: "both";
         }>;
+        cause: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     creditAllocation: z.ZodOptional<z.ZodObject<{
         initialBalance: z.ZodOptional<z.ZodNumber>;

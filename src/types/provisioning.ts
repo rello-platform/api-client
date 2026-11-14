@@ -131,6 +131,10 @@ export const tenantPlanGrantsSchema = z.object({
   // Null for a tenant with no plan (a cancelled tenant: grants [] and planSlug
   // null; KA ruling G-15). Still a required key.
   planSlug: z.string().nullable(),
+  // KA amendment 1109. plan_change = this grant set replaces another because of
+  // a plan switch; absent = any other change. A plain string, never an enum, so
+  // a later cause value never makes an older receiver refuse the push.
+  cause: z.string().optional(),
 });
 
 export type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
@@ -138,8 +142,9 @@ export type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
 /**
  * PFP Gateway §4.3 rule 3 — the effective Check Your Rate record: the eight
  * named fields of `billing.addon_changed`. Non-strict on purpose (GD-1582): the
- * event's other keys (previousStatus, addOnId, tenantAddOnId, cause) are
- * accepted and dropped.
+ * event's other keys (previousStatus, addOnId, tenantAddOnId) are accepted and
+ * dropped. `cause` is kept (KA amendment 1109): plan_change = this record
+ * changed because of a plan switch; absent = any other change.
  */
 export const tenantCyrStateSchema = z.object({
   /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
@@ -154,6 +159,8 @@ export const tenantCyrStateSchema = z.object({
   seq: z.number().int().nonnegative(),
   /** Display only; never used to decide serving. */
   source: z.enum(["addon", "plan", "both"]),
+  /** plan_change = changed because of a plan switch; absent = any other change. A plain string, never an enum. */
+  cause: z.string().optional(),
 });
 
 export type TenantCyrState = z.infer<typeof tenantCyrStateSchema>;

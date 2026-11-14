@@ -2070,7 +2070,11 @@ var tenantPlanGrantsSchema = import_zod.z.object({
   grants: import_zod.z.array(import_zod.z.string()),
   // Null for a tenant with no plan (a cancelled tenant: grants [] and planSlug
   // null; KA ruling G-15). Still a required key.
-  planSlug: import_zod.z.string().nullable()
+  planSlug: import_zod.z.string().nullable(),
+  // KA amendment 1109. plan_change = this grant set replaces another because of
+  // a plan switch; absent = any other change. A plain string, never an enum, so
+  // a later cause value never makes an older receiver refuse the push.
+  cause: import_zod.z.string().optional()
 });
 var tenantCyrStateSchema = import_zod.z.object({
   /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
@@ -2084,7 +2088,9 @@ var tenantCyrStateSchema = import_zod.z.object({
   /** Strictly increasing integer per (tenant, feature). */
   seq: import_zod.z.number().int().nonnegative(),
   /** Display only; never used to decide serving. */
-  source: import_zod.z.enum(["addon", "plan", "both"])
+  source: import_zod.z.enum(["addon", "plan", "both"]),
+  /** plan_change = changed because of a plan switch; absent = any other change. A plain string, never an enum. */
+  cause: import_zod.z.string().optional()
 });
 var tenantDisablePayloadSchema = import_zod.z.object({
   action: import_zod.z.literal("disable"),

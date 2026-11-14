@@ -141,8 +141,8 @@ test("cyr refuses a malformed record", () => {
 
 // GD-1601 (PLATFORM AUDIT 97): the body Rello's R1 sends (cyr-entitlement.ts,
 // billing.addon_changed) names eight fields — featureSlug among them — plus four
-// extras. All eight must survive the parse; the four extras are accepted and
-// dropped (the schema stays non-strict, GD-1582).
+// extras. All eight must survive the parse. KA amendment 1109 keeps `cause` too;
+// the other three extras are accepted and dropped (non-strict, GD-1582).
 const R1_EVENT = {
   seq: 1,
   cause: "addon.start",
@@ -162,7 +162,8 @@ const EIGHT = ["featureSlug", "status", "quantity", "trialEndsAt", "canceledAt",
 test("GD-1601: R1's billing.addon_changed body keeps all eight named fields, featureSlug included", () => {
   const got = tenantCyrStateSchema.parse(R1_EVENT);
   for (const key of EIGHT) assert.deepEqual(got[key], R1_EVENT[key], `${key} must survive`);
-  assert.deepEqual(Object.keys(got).sort(), [...EIGHT].sort(), "the four extras are dropped, nothing else");
+  assert.equal(got.cause, "addon.start", "cause is kept (amendment 1109)");
+  assert.deepEqual(Object.keys(got).sort(), [...EIGHT, "cause"].sort(), "the three other extras are dropped, nothing else");
   const viaEnable = tenantEnablePayloadSchema.parse({ ...basePayload(), cyr: R1_EVENT });
   assert.equal(viaEnable.cyr.featureSlug, "check-your-rate");
 });
