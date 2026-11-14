@@ -2017,7 +2017,16 @@ var provisionedAgentSchema = import_zod.z.object({
   // Present when agent has completed the Rello Start Wizard. Only sent in
   // tenant-enable (bulk) — per-agent provision carries these at the top level.
   agentProfile: import_zod.z.lazy(() => agentProfileSchema).optional(),
-  wizardAnswers: import_zod.z.array(import_zod.z.lazy(() => wizardAnswerSchema)).optional()
+  wizardAnswers: import_zod.z.array(import_zod.z.lazy(() => wizardAnswerSchema)).optional(),
+  // PFP Gateway G-6a-pre (spec §G-8 (a) [B8, K-178]; KA prompts 1105/1106).
+  // Optional: absent means the sender did not say, never false.
+  // hasLinkedUser — the Rello Agent has a linked User (Agent.userId set).
+  //   Home Scout's page editor uses it to say a loan officer needs a Rello
+  //   login before their page can own leads. A setup message, never a hold.
+  hasLinkedUser: import_zod.z.boolean().optional(),
+  // isTenantOwner — the agent's linked User holds an owner role. PathfinderPro
+  //   uses it to pick the account's shared rate source at write time.
+  isTenantOwner: import_zod.z.boolean().optional()
 });
 var tenantEnablePayloadSchema = import_zod.z.object({
   action: import_zod.z.literal("enable"),
@@ -2059,7 +2068,13 @@ var tenantPlanGrantsSchema = import_zod.z.object({
   /** Strictly increasing per tenant; Rello's TenantPlanGrantState.rev. */
   rev: import_zod.z.number().int().nonnegative(),
   grants: import_zod.z.array(import_zod.z.string()),
-  planSlug: import_zod.z.string()
+  // Null for a tenant with no plan (a cancelled tenant: grants [] and planSlug
+  // null; KA ruling G-15). Still a required key.
+  planSlug: import_zod.z.string().nullable(),
+  // KA amendment 1109. plan_change = this grant set replaces another because of
+  // a plan switch; absent = any other change. A plain string, never an enum, so
+  // a later cause value never makes an older receiver refuse the push.
+  cause: import_zod.z.string().optional()
 });
 var tenantCyrStateSchema = import_zod.z.object({
   /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
@@ -2073,7 +2088,9 @@ var tenantCyrStateSchema = import_zod.z.object({
   /** Strictly increasing integer per (tenant, feature). */
   seq: import_zod.z.number().int().nonnegative(),
   /** Display only; never used to decide serving. */
-  source: import_zod.z.enum(["addon", "plan", "both"])
+  source: import_zod.z.enum(["addon", "plan", "both"]),
+  /** plan_change = changed because of a plan switch; absent = any other change. A plain string, never an enum. */
+  cause: import_zod.z.string().optional()
 });
 var tenantDisablePayloadSchema = import_zod.z.object({
   action: import_zod.z.literal("disable"),

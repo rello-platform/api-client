@@ -64,6 +64,16 @@ export const provisionedAgentSchema = z.object({
   // tenant-enable (bulk) — per-agent provision carries these at the top level.
   agentProfile: z.lazy(() => agentProfileSchema).optional(),
   wizardAnswers: z.array(z.lazy(() => wizardAnswerSchema)).optional(),
+
+  // PFP Gateway G-6a-pre (spec §G-8 (a) [B8, K-178]; KA prompts 1105/1106).
+  // Optional: absent means the sender did not say, never false.
+  // hasLinkedUser — the Rello Agent has a linked User (Agent.userId set).
+  //   Home Scout's page editor uses it to say a loan officer needs a Rello
+  //   login before their page can own leads. A setup message, never a hold.
+  hasLinkedUser: z.boolean().optional(),
+  // isTenantOwner — the agent's linked User holds an owner role. PathfinderPro
+  //   uses it to pick the account's shared rate source at write time.
+  isTenantOwner: z.boolean().optional(),
 });
 
 export type ProvisionedAgent = z.infer<typeof provisionedAgentSchema>;
@@ -118,7 +128,13 @@ export const tenantPlanGrantsSchema = z.object({
   /** Strictly increasing per tenant; Rello's TenantPlanGrantState.rev. */
   rev: z.number().int().nonnegative(),
   grants: z.array(z.string()),
-  planSlug: z.string(),
+  // Null for a tenant with no plan (a cancelled tenant: grants [] and planSlug
+  // null; KA ruling G-15). Still a required key.
+  planSlug: z.string().nullable(),
+  // KA amendment 1109. plan_change = this grant set replaces another because of
+  // a plan switch; absent = any other change. A plain string, never an enum, so
+  // a later cause value never makes an older receiver refuse the push.
+  cause: z.string().optional(),
 });
 
 export type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
@@ -126,8 +142,9 @@ export type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
 /**
  * PFP Gateway §4.3 rule 3 — the effective Check Your Rate record: the eight
  * named fields of `billing.addon_changed`. Non-strict on purpose (GD-1582): the
- * event's other keys (previousStatus, addOnId, tenantAddOnId, cause) are
- * accepted and dropped.
+ * event's other keys (previousStatus, addOnId, tenantAddOnId) are accepted and
+ * dropped. `cause` is kept (KA amendment 1109): plan_change = this record
+ * changed because of a plan switch; absent = any other change.
  */
 export const tenantCyrStateSchema = z.object({
   /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
@@ -142,6 +159,8 @@ export const tenantCyrStateSchema = z.object({
   seq: z.number().int().nonnegative(),
   /** Display only; never used to decide serving. */
   source: z.enum(["addon", "plan", "both"]),
+  /** plan_change = changed because of a plan switch; absent = any other change. A plain string, never an enum. */
+  cause: z.string().optional(),
 });
 
 export type TenantCyrState = z.infer<typeof tenantCyrStateSchema>;
