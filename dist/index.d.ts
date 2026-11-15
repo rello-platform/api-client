@@ -2252,6 +2252,7 @@ declare const provisionedAgentSchema: z.ZodObject<{
     }, z.core.$strip>>>>;
     hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
     isTenantOwner: z.ZodOptional<z.ZodBoolean>;
+    loginless: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 type ProvisionedAgent = z.infer<typeof provisionedAgentSchema>;
 declare const tenantEnablePayloadSchema: z.ZodObject<{
@@ -2320,6 +2321,7 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
         }, z.core.$strip>>>>;
         hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
         isTenantOwner: z.ZodOptional<z.ZodBoolean>;
+        loginless: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
     planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         rev: z.ZodNumber;
@@ -2465,6 +2467,7 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
         }, z.core.$strip>>>>;
         hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
         isTenantOwner: z.ZodOptional<z.ZodBoolean>;
+        loginless: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
     planGrants: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         rev: z.ZodNumber;
@@ -2561,6 +2564,7 @@ declare const agentProvisionPayloadSchema: z.ZodObject<{
         }, z.core.$strip>>>>;
         hasLinkedUser: z.ZodOptional<z.ZodBoolean>;
         isTenantOwner: z.ZodOptional<z.ZodBoolean>;
+        loginless: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>;
     agentProfile: z.ZodOptional<z.ZodObject<{
         specialtySentence: z.ZodOptional<z.ZodString>;
@@ -2620,6 +2624,106 @@ declare function parseAgentPayload(body: unknown): {
     success: false;
     error: string;
 };
+
+/**
+ * PFP Gateway X2: PathfinderPro → Rello roster routes (spec SPEC-PFP-GATEWAY.md
+ * rev 10.30 §6 "[D30] Extra-signature MLOs", G-EXTRAS, D33; Platform KA prompts
+ * 1152/1155, plan a4-1151 ruled). One contract for Rello's routes and PFP's callers.
+ *
+ * Auth on every route: `Authorization: Bearer <ApiKey>` (Rello's ApiKey table,
+ * targetApp RELLO), the route's narrow permission (`agents:loginless:write` /
+ * `team:members:write`), the key's appSource enabled for the tenant, a
+ * tenant-bound key naming only its own tenant, and `actingRelloUserId` an active
+ * owner of that tenant. The tenant is never taken from a header.
+ *
+ *   POST /api/provisioning/loginless-agent                       (X2a)
+ *   POST /api/provisioning/loginless-agent/[agentId]/remove      (X2a)
+ *   POST /api/provisioning/team-member                           (X2b)
+ *   POST /api/provisioning/team-member/[userId]/sign-in-link     (X2b)
+ *   POST /api/provisioning/team-member/[userId]/remove           (X2b)
+ */
+
+/** Only name and email: NMLS, licensed states, phone and photo are Home Scout's (§4.9). */
+declare const loginlessAgentCreateRequestSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    actingRelloUserId: z.ZodString;
+    firstName: z.ZodString;
+    lastName: z.ZodString;
+    email: z.ZodPipe<z.ZodString, z.ZodEmail>;
+    requestId: z.ZodString;
+}, z.core.$strict>;
+type LoginlessAgentCreateRequest = z.infer<typeof loginlessAgentCreateRequestSchema>;
+/** 201 on create; 200 with `replayed: true` for the same requestId and body. */
+interface LoginlessAgentCreateResponse {
+    relloAgentId: string;
+    slug: string;
+    email: string;
+    replayed: boolean;
+}
+declare const loginlessAgentRemoveRequestSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    actingRelloUserId: z.ZodString;
+}, z.core.$strict>;
+type LoginlessAgentRemoveRequest = z.infer<typeof loginlessAgentRemoveRequestSchema>;
+/** 200. Remove sets the agent INACTIVE; nothing is deleted. */
+interface LoginlessAgentRemoveResponse {
+    relloAgentId: string;
+    status: "INACTIVE";
+    alreadyInactive: boolean;
+}
+declare const teamMemberCreateRequestSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    actingRelloUserId: z.ZodString;
+    email: z.ZodPipe<z.ZodString, z.ZodEmail>;
+    firstName: z.ZodString;
+    lastName: z.ZodString;
+    requestId: z.ZodString;
+}, z.core.$strict>;
+type TeamMemberCreateRequest = z.infer<typeof teamMemberCreateRequestSchema>;
+interface TeamMemberCreateResponse {
+    userId: string;
+    relloAgentId: string;
+    email: string;
+    signInEmail: "queued";
+    replayed: boolean;
+}
+declare const teamMemberSignInLinkRequestSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    actingRelloUserId: z.ZodString;
+}, z.core.$strict>;
+type TeamMemberSignInLinkRequest = z.infer<typeof teamMemberSignInLinkRequestSchema>;
+declare const teamMemberRemoveRequestSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    actingRelloUserId: z.ZodString;
+}, z.core.$strict>;
+type TeamMemberRemoveRequest = z.infer<typeof teamMemberRemoveRequestSchema>;
+interface TeamMemberRemoveResponse {
+    userId: string;
+    isActive: false;
+    alreadyInactive: boolean;
+}
+declare const ROSTER_ERROR_CODES: readonly ["invalid_body", "unauthorized", "key_not_scoped", "missing_permission", "unknown_app", "tenant_mismatch", "app_not_enabled", "actor_not_owner", "agent_not_found", "member_not_found", "signature_quantity_needed", "login_quantity_needed", "email_in_use", "already_member", "email_registered_elsewhere", "idempotency_key_reused", "internal_error"];
+type RosterErrorCode = (typeof ROSTER_ERROR_CODES)[number];
+/** Every non-2xx body. `error` is for a person; `code` is for the caller. */
+interface RosterError {
+    code: RosterErrorCode;
+    error: string;
+}
+/** 409 signature_quantity_needed: the fix is one more `pfp-extra-signature`. */
+interface SignatureQuantityNeeded extends RosterError {
+    code: "signature_quantity_needed";
+    purchased: number;
+    extras: number;
+    addOnCatalogKey: "pfp-extra-signature";
+}
+/** 409 login_quantity_needed: the fix is one more `pfp-extra-team-login`. */
+interface LoginQuantityNeeded extends RosterError {
+    code: "login_quantity_needed";
+    included: number;
+    purchased: number;
+    members: number;
+    addOnCatalogKey: "pfp-extra-team-login";
+}
 
 /**
  * implicit-apikey-telemetry — make the implicit-RELLO_API_KEY fallback COUNTABLE.
@@ -2695,4 +2799,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SignatureQuantityNeeded, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };

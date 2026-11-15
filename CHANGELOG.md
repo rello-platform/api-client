@@ -6,6 +6,39 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.33.0 — 2026-11-15
+
+### Added — `loginless` on the provisioned agent, and the X2 roster route contract (PFP Gateway X2)
+
+Spec SPEC-PFP-GATEWAY.md rev 10.30 §6 "[D30] Extra-signature MLOs", G-EXTRAS and
+D33; Platform KA prompts 1152/1153/1155 (plan a4-1151 ruled).
+
+- `provisionedAgentSchema.loginless`: an optional boolean. `true` marks a D30
+  extra-signature loan officer, a Rello Agent that never has a login. Rello
+  sends it on every tenant-enable push, true or false. An absent key (an older
+  Rello) is UNKNOWN, never "has a login". The schema is a plain `z.object`, which
+  strips unknown keys, and Rello sends the parsed payload, so at v2.32.0 the
+  flag never reached the wire. The per-agent push carries the same field through
+  `@rello-platform/agent-provisioning` v0.10.0.
+- `src/types/roster.ts`: request schemas (strict), answers and the closed
+  `ROSTER_ERROR_CODES` list for
+  - `POST /api/provisioning/loginless-agent` and `.../[agentId]/remove` (X2a);
+  - `POST /api/provisioning/team-member`, `.../[userId]/sign-in-link` and
+    `.../[userId]/remove` (X2b).
+
+  The two quantity refusals carry their fix: `signature_quantity_needed` names
+  `pfp-extra-signature`, and `login_quantity_needed` names `pfp-extra-team-login`.
+
+Version: v2.33.0 was free when this opened (latest tag v2.32.0; open PR #10
+still names 2.29.0 and takes the next free number when it merges). Agent 7's
+PKG-2 and Agent 6's G-A2P also planned v2.33.0 and take the next free one.
+The package's own permissions pin stays v0.60.0: the X2 routes are validated
+by Rello's ApiKey table, not by `createServiceBearerGuard`.
+
+Test: `tests/x2-roster-loginless.test.mjs` (4 tests). Red at v2.32.0 (4 of 4
+fail), green here. Mutant: `loginless` dropped from `provisionedAgentSchema` →
+the tenant-enable test fails; restored byte-for-byte.
+
 ## v2.32.0 — 2026-11-14
 
 ### Changed — the package's own `@rello-platform/permissions` re-pinned v0.54.0 → v0.60.0
