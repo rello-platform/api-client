@@ -74,6 +74,11 @@ export const provisionedAgentSchema = z.object({
   // isTenantOwner — the agent's linked User holds an owner role. PathfinderPro
   //   uses it to pick the account's shared rate source at write time.
   isTenantOwner: z.boolean().optional(),
+  // PFP Gateway X2a (spec rev 10.30 §6 [D30]; KA prompts 1153/1155).
+  // loginless — a D30 extra-signature loan officer: a Rello Agent that never has
+  //   a login (Agent.loginless, CHECK-guarded to userId NULL). Rello always sends
+  //   it, true or false; absent (an older Rello) is UNKNOWN, never "has a login".
+  loginless: z.boolean().optional(),
 });
 
 export type ProvisionedAgent = z.infer<typeof provisionedAgentSchema>;

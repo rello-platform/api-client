@@ -157,3 +157,28 @@ export {
   parseTenantPayload,
   parseAgentPayload,
 } from "./provisioning.js";
+
+// PFP Gateway X2 roster routes (loginless agent, team member)
+export {
+  loginlessAgentCreateRequestSchema,
+  loginlessAgentRemoveRequestSchema,
+  teamMemberCreateRequestSchema,
+  teamMemberSignInLinkRequestSchema,
+  teamMemberRemoveRequestSchema,
+  ROSTER_ERROR_CODES,
+} from "./roster.js";
+export type {
+  LoginlessAgentCreateRequest,
+  LoginlessAgentCreateResponse,
+  LoginlessAgentRemoveRequest,
+  LoginlessAgentRemoveResponse,
+  TeamMemberCreateRequest,
+  TeamMemberCreateResponse,
+  TeamMemberSignInLinkRequest,
+  TeamMemberRemoveRequest,
+  TeamMemberRemoveResponse,
+  RosterErrorCode,
+  RosterError,
+  SignatureQuantityNeeded,
+  LoginQuantityNeeded,
+} from "./roster.js";

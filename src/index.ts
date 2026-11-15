@@ -187,6 +187,31 @@ export {
   parseAgentPayload,
 } from "./types/index.js";
 
+// PFP Gateway X2 roster routes (loginless agent, team member)
+export {
+  loginlessAgentCreateRequestSchema,
+  loginlessAgentRemoveRequestSchema,
+  teamMemberCreateRequestSchema,
+  teamMemberSignInLinkRequestSchema,
+  teamMemberRemoveRequestSchema,
+  ROSTER_ERROR_CODES,
+} from "./types/index.js";
+export type {
+  LoginlessAgentCreateRequest,
+  LoginlessAgentCreateResponse,
+  LoginlessAgentRemoveRequest,
+  LoginlessAgentRemoveResponse,
+  TeamMemberCreateRequest,
+  TeamMemberCreateResponse,
+  TeamMemberSignInLinkRequest,
+  TeamMemberRemoveRequest,
+  TeamMemberRemoveResponse,
+  RosterErrorCode,
+  RosterError,
+  SignatureQuantityNeeded,
+  LoginQuantityNeeded,
+} from "./types/index.js";
+
 
 // Implicit-apiKey telemetry — lets a process be ASKED how many construction
 // sites still rely on the RELLO_API_KEY fallback, rather than tailing a log a

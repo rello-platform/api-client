@@ -23,6 +23,7 @@ __export(index_exports, {
   AdminResource: () => AdminResource,
   AuthResource: () => AuthResource,
   PROPERTY_AUTOFILL_FIELD_KEYS: () => PROPERTY_AUTOFILL_FIELD_KEYS,
+  ROSTER_ERROR_CODES: () => ROSTER_ERROR_CODES,
   RelloAuthError: () => RelloAuthError,
   RelloClient: () => RelloClient,
   RelloError: () => RelloError,
@@ -49,11 +50,16 @@ __export(index_exports, {
   getPropertyEngineHeaders: () => getPropertyEngineHeaders,
   getRelloBaseUrl: () => getRelloBaseUrl,
   hasPropertyEngineCredentials: () => hasPropertyEngineCredentials,
+  loginlessAgentCreateRequestSchema: () => loginlessAgentCreateRequestSchema,
+  loginlessAgentRemoveRequestSchema: () => loginlessAgentRemoveRequestSchema,
   parseAgentPayload: () => parseAgentPayload,
   parseTenantPayload: () => parseTenantPayload,
   provisionedAgentSchema: () => provisionedAgentSchema,
   resetImplicitApiKeyUses: () => resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck: () => runRelloPermissionSelfCheck,
+  teamMemberCreateRequestSchema: () => teamMemberCreateRequestSchema,
+  teamMemberRemoveRequestSchema: () => teamMemberRemoveRequestSchema,
+  teamMemberSignInLinkRequestSchema: () => teamMemberSignInLinkRequestSchema,
   tenantCyrStateSchema: () => tenantCyrStateSchema,
   tenantDisablePayloadSchema: () => tenantDisablePayloadSchema,
   tenantEnablePayloadSchema: () => tenantEnablePayloadSchema,
@@ -2026,7 +2032,12 @@ var provisionedAgentSchema = import_zod.z.object({
   hasLinkedUser: import_zod.z.boolean().optional(),
   // isTenantOwner — the agent's linked User holds an owner role. PathfinderPro
   //   uses it to pick the account's shared rate source at write time.
-  isTenantOwner: import_zod.z.boolean().optional()
+  isTenantOwner: import_zod.z.boolean().optional(),
+  // PFP Gateway X2a (spec rev 10.30 §6 [D30]; KA prompts 1153/1155).
+  // loginless — a D30 extra-signature loan officer: a Rello Agent that never has
+  //   a login (Agent.loginless, CHECK-guarded to userId NULL). Rello always sends
+  //   it, true or false; absent (an older Rello) is UNKNOWN, never "has a login".
+  loginless: import_zod.z.boolean().optional()
 });
 var tenantEnablePayloadSchema = import_zod.z.object({
   action: import_zod.z.literal("enable"),
@@ -2155,6 +2166,68 @@ function parseAgentPayload(body) {
   return { success: false, error: `Payload validation failed: ${issues}` };
 }
 
+// src/types/roster.ts
+var import_zod2 = require("zod");
+var rosterIdField = (name) => import_zod2.z.string({ error: `${name} is required and must be a string` }).trim().min(1, `${name} is required`).max(128, `${name} is too long`);
+var rosterNameField = (name) => import_zod2.z.string({ error: `${name} is required and must be a string` }).trim().min(1, `${name} is required`).max(100, `${name} is too long`);
+var rosterEmailField = import_zod2.z.string({ error: "email is required and must be a string" }).trim().toLowerCase().max(254, "email is too long").pipe(import_zod2.z.email("email is not a valid address"));
+var rosterRequestIdField = import_zod2.z.string({ error: "requestId is required and must be a string" }).trim().min(8, "requestId must be 8 to 200 characters").max(200, "requestId must be 8 to 200 characters");
+var loginlessAgentCreateRequestSchema = import_zod2.z.object({
+  tenantId: rosterIdField("tenantId"),
+  actingRelloUserId: rosterIdField("actingRelloUserId"),
+  firstName: rosterNameField("firstName"),
+  lastName: rosterNameField("lastName"),
+  email: rosterEmailField,
+  requestId: rosterRequestIdField
+}).strict();
+var loginlessAgentRemoveRequestSchema = import_zod2.z.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamMemberCreateRequestSchema = import_zod2.z.object({
+  tenantId: rosterIdField("tenantId"),
+  actingRelloUserId: rosterIdField("actingRelloUserId"),
+  email: rosterEmailField,
+  firstName: rosterNameField("firstName"),
+  lastName: rosterNameField("lastName"),
+  requestId: rosterRequestIdField
+}).strict();
+var teamMemberSignInLinkRequestSchema = import_zod2.z.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamMemberRemoveRequestSchema = import_zod2.z.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var ROSTER_ERROR_CODES = [
+  "invalid_body",
+  // 400
+  "unauthorized",
+  // 401: no, invalid, expired or revoked key
+  "key_not_scoped",
+  // 403: targetApp is not RELLO
+  "missing_permission",
+  // 403
+  "unknown_app",
+  // 403: the key's appSource matches no App
+  "tenant_mismatch",
+  // 403: a tenant-bound key named another tenant
+  "app_not_enabled",
+  // 403: the calling app is not enabled for the tenant
+  "actor_not_owner",
+  // 403: actingRelloUserId is not an active owner of the tenant
+  "agent_not_found",
+  // 404
+  "member_not_found",
+  // 404
+  "signature_quantity_needed",
+  // 409: buy one more extra signature first
+  "login_quantity_needed",
+  // 409: buy one more extra login first
+  "email_in_use",
+  // 409: an agent of this tenant already has the email
+  "already_member",
+  // 409
+  "email_registered_elsewhere",
+  // 409
+  "idempotency_key_reused",
+  // 409: same requestId, different body
+  "internal_error"
+  // 500: nothing was saved; try again
+];
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2167,6 +2240,7 @@ function createServiceClient(config) {
   AdminResource,
   AuthResource,
   PROPERTY_AUTOFILL_FIELD_KEYS,
+  ROSTER_ERROR_CODES,
   RelloAuthError,
   RelloClient,
   RelloError,
@@ -2193,11 +2267,16 @@ function createServiceClient(config) {
   getPropertyEngineHeaders,
   getRelloBaseUrl,
   hasPropertyEngineCredentials,
+  loginlessAgentCreateRequestSchema,
+  loginlessAgentRemoveRequestSchema,
   parseAgentPayload,
   parseTenantPayload,
   provisionedAgentSchema,
   resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck,
+  teamMemberCreateRequestSchema,
+  teamMemberRemoveRequestSchema,
+  teamMemberSignInLinkRequestSchema,
   tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,
