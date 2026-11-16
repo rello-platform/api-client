@@ -113,6 +113,10 @@ export const tenantEnablePayloadSchema = z.object({
   // the same fields as `billing.addon_changed`. null when the tenant never
   // held it. A receiver applies it only when strictly newer (seq, else occurredAt).
   cyr: z.lazy(() => tenantCyrStateSchema).nullable().optional(),
+  // PFP Gateway G-EXTRAS (PKG-2): every add-on state record the tenant holds
+  // (Check Your Rate, Refi Radar, ...), one per featureSlug, same shape as `cyr`.
+  // Absent = an older Rello (unknown, never "no add-ons"); none held = [].
+  addOns: z.array(z.lazy(() => tenantCyrStateSchema)).optional(),
   // HH-specific: initial credit grant for new tenants. Optional — only
   // sent when the spoke app has a credit system (currently only HH).
   // Spokes without credits ignore this field.

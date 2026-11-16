@@ -1997,6 +1997,10 @@ var tenantEnablePayloadSchema = z.object({
   // the same fields as `billing.addon_changed`. null when the tenant never
   // held it. A receiver applies it only when strictly newer (seq, else occurredAt).
   cyr: z.lazy(() => tenantCyrStateSchema).nullable().optional(),
+  // PFP Gateway G-EXTRAS (PKG-2): every add-on state record the tenant holds
+  // (Check Your Rate, Refi Radar, ...), one per featureSlug, same shape as `cyr`.
+  // Absent = an older Rello (unknown, never "no add-ons"); none held = [].
+  addOns: z.array(z.lazy(() => tenantCyrStateSchema)).optional(),
   // HH-specific: initial credit grant for new tenants. Optional — only
   // sent when the spoke app has a credit system (currently only HH).
   // Spokes without credits ignore this field.
@@ -2365,6 +2369,119 @@ var smsRegistrationChangedEvent = z3.strictObject({
   data: smsRegistrationEnvelope
 });
 
+// src/types/billing-switch.ts
+import { z as z4 } from "zod";
+var PLAN_SWITCH_INTERVALS = ["month", "year"];
+var intervalField = z4.enum(PLAN_SWITCH_INTERVALS);
+var planSwitchPreviewQuerySchema = z4.object({
+  targetPlanSlug: z4.string().trim().min(1),
+  interval: intervalField.optional()
+}).strict();
+var planSwitchRequestSchema = z4.object({
+  targetPlanSlug: z4.string().min(1),
+  /** Absent = the current interval. */
+  interval: intervalField.optional(),
+  idempotencyKey: z4.string().min(8).max(200),
+  previewId: z4.string().min(1).optional(),
+  confirmedChargeChange: z4.unknown().optional()
+}).strict();
+var PLAN_SWITCH_ERROR_CODES = [
+  "invalid_body",
+  "idempotency_key_reused",
+  "switch_not_allowed",
+  "contact_sales",
+  "members_exceed_target",
+  "addon_price_not_configured",
+  "billing_mode_classic",
+  "already_on_plan",
+  "confirmation_required",
+  "preview_stale",
+  "preview_consumed",
+  "stale_switch",
+  "switch_in_progress",
+  "payment_failed",
+  "provider_unreadable",
+  "not_armed",
+  "use_plan_switch",
+  "operation_not_found"
+];
+var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"];
+var previewStaleErrorSchema = z4.object({
+  error: z4.literal("preview_stale"),
+  reason: z4.string().optional()
+});
+var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
+var addOnQuantityRequestSchema = z4.object({
+  quantity: z4.number().int().nonnegative(),
+  quantityRev: z4.union([z4.number().int().nonnegative(), z4.string().regex(/^\d{1,18}$/)])
+}).strict();
+var addOnQuantityResponseSchema = z4.object({
+  tenantAddOnId: z4.string(),
+  /** The quantity this revision asked for. */
+  quantity: z4.number().int().nonnegative(),
+  /** The revision, as a decimal string. */
+  quantityRev: z4.string(),
+  /** What Stripe bills now. */
+  billedQuantity: z4.number().int().nonnegative(),
+  /** A newer revision already superseded this one; Stripe converges on the newest. */
+  superseded: z4.boolean(),
+  /** X1: the TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). Absent from R1. */
+  status: z4.string().optional(),
+  /** X1: true when quantity 0 ended the add-on's own subscription. Absent from R1. */
+  subscriptionCanceled: z4.boolean().optional()
+});
+var ADDON_QUANTITY_ERROR_CODES = [
+  "members_exceed_quantity",
+  "extra_mlos_exceed_quantity",
+  "stale_quantity_rev",
+  "contact_sales",
+  "included_in_plan",
+  "addon_price_not_configured",
+  "addon_not_found",
+  "addon_not_active",
+  "addon_state_unknown",
+  "quantity_not_supported",
+  "payment_method_required",
+  "stripe_failed"
+];
+var ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES = [
+  "IDEMPOTENCY_KEY_REQUIRED",
+  "IDEMPOTENCY_KEY_INVALID",
+  "IDEMPOTENCY_KEY_CONFLICT"
+];
+var extraMlosExceedQuantityErrorSchema = z4.object({
+  success: z4.literal(false),
+  error: z4.string(),
+  code: z4.literal("extra_mlos_exceed_quantity"),
+  activeLoginless: z4.number().int().nonnegative(),
+  quantity: z4.number().int().nonnegative()
+});
+var membersExceedQuantityErrorSchema = z4.object({
+  success: z4.literal(false),
+  error: z4.string(),
+  code: z4.literal("members_exceed_quantity"),
+  activeMembers: z4.number().int().nonnegative(),
+  quantity: z4.number().int().nonnegative()
+});
+var addOnQuantityOtherErrorSchema = z4.object({
+  success: z4.literal(false).optional(),
+  /** Human-readable. */
+  error: z4.string(),
+  code: z4.string().optional()
+}).loose();
+var addOnQuantityErrorSchema = z4.union([
+  extraMlosExceedQuantityErrorSchema,
+  membersExceedQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema
+]);
+function isExtraMlosExceedQuantityError(e) {
+  return extraMlosExceedQuantityErrorSchema.safeParse(e).success;
+}
+function isMembersExceedQuantityError(e) {
+  return membersExceedQuantityErrorSchema.safeParse(e).success;
+}
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2373,8 +2490,15 @@ function createServiceClient(config) {
   return new ServiceClient(config);
 }
 export {
+  ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource,
   AuthResource,
+  PLAN_SWITCH_ERROR_CODES,
+  PLAN_SWITCH_INTERVALS,
+  PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS,
   ROSTER_ERROR_CODES,
   RelloAuthError,
@@ -2386,6 +2510,10 @@ export {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  addOnQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema,
+  addOnQuantityRequestSchema,
+  addOnQuantityResponseSchema,
   agentProvisionPayloadSchema,
   businessIndustry,
   businessType,
@@ -2396,6 +2524,7 @@ export {
   createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
+  extraMlosExceedQuantityErrorSchema,
   feeChangedConflict,
   feeNotFound,
   feeSlugQuery,
@@ -2410,11 +2539,17 @@ export {
   getRelloBaseUrl,
   hasPropertyEngineCredentials,
   internalError,
+  isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError,
   loginlessAgentCreateRequestSchema,
   loginlessAgentRemoveRequestSchema,
+  membersExceedQuantityErrorSchema,
   oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,
+  planSwitchPreviewQuerySchema,
+  planSwitchRequestSchema,
+  previewStaleErrorSchema,
   provisionedAgentSchema,
   quoteVersion,
   registrationConflict,

@@ -20,8 +20,15 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var index_exports = {};
 __export(index_exports, {
+  ADDON_QUANTITY_ERROR_CODES: () => ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES: () => ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER: () => ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: () => ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource: () => AdminResource,
   AuthResource: () => AuthResource,
+  PLAN_SWITCH_ERROR_CODES: () => PLAN_SWITCH_ERROR_CODES,
+  PLAN_SWITCH_INTERVALS: () => PLAN_SWITCH_INTERVALS,
+  PREVIEW_STALE_REASONS: () => PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS: () => PROPERTY_AUTOFILL_FIELD_KEYS,
   ROSTER_ERROR_CODES: () => ROSTER_ERROR_CODES,
   RelloAuthError: () => RelloAuthError,
@@ -33,6 +40,10 @@ __export(index_exports, {
   RelloUnavailableError: () => RelloUnavailableError,
   RelloValidationError: () => RelloValidationError,
   ServiceClient: () => ServiceClient,
+  addOnQuantityErrorSchema: () => addOnQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema: () => addOnQuantityOtherErrorSchema,
+  addOnQuantityRequestSchema: () => addOnQuantityRequestSchema,
+  addOnQuantityResponseSchema: () => addOnQuantityResponseSchema,
   agentProvisionPayloadSchema: () => agentProvisionPayloadSchema,
   businessIndustry: () => businessIndustry,
   businessType: () => businessType,
@@ -43,6 +54,7 @@ __export(index_exports, {
   createRelloPermissionSelfCheck: () => createRelloPermissionSelfCheck,
   createServiceBearerGuard: () => createServiceBearerGuard,
   createServiceClient: () => createServiceClient,
+  extraMlosExceedQuantityErrorSchema: () => extraMlosExceedQuantityErrorSchema,
   feeChangedConflict: () => feeChangedConflict,
   feeNotFound: () => feeNotFound,
   feeSlugQuery: () => feeSlugQuery,
@@ -57,11 +69,17 @@ __export(index_exports, {
   getRelloBaseUrl: () => getRelloBaseUrl,
   hasPropertyEngineCredentials: () => hasPropertyEngineCredentials,
   internalError: () => internalError,
+  isExtraMlosExceedQuantityError: () => isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError: () => isMembersExceedQuantityError,
   loginlessAgentCreateRequestSchema: () => loginlessAgentCreateRequestSchema,
   loginlessAgentRemoveRequestSchema: () => loginlessAgentRemoveRequestSchema,
+  membersExceedQuantityErrorSchema: () => membersExceedQuantityErrorSchema,
   oneTimeFeeQuote: () => oneTimeFeeQuote,
   parseAgentPayload: () => parseAgentPayload,
   parseTenantPayload: () => parseTenantPayload,
+  planSwitchPreviewQuerySchema: () => planSwitchPreviewQuerySchema,
+  planSwitchRequestSchema: () => planSwitchRequestSchema,
+  previewStaleErrorSchema: () => previewStaleErrorSchema,
   provisionedAgentSchema: () => provisionedAgentSchema,
   quoteVersion: () => quoteVersion,
   registrationConflict: () => registrationConflict,
@@ -2087,6 +2105,10 @@ var tenantEnablePayloadSchema = import_zod.z.object({
   // the same fields as `billing.addon_changed`. null when the tenant never
   // held it. A receiver applies it only when strictly newer (seq, else occurredAt).
   cyr: import_zod.z.lazy(() => tenantCyrStateSchema).nullable().optional(),
+  // PFP Gateway G-EXTRAS (PKG-2): every add-on state record the tenant holds
+  // (Check Your Rate, Refi Radar, ...), one per featureSlug, same shape as `cyr`.
+  // Absent = an older Rello (unknown, never "no add-ons"); none held = [].
+  addOns: import_zod.z.array(import_zod.z.lazy(() => tenantCyrStateSchema)).optional(),
   // HH-specific: initial credit grant for new tenants. Optional — only
   // sent when the spoke app has a credit system (currently only HH).
   // Spokes without credits ignore this field.
@@ -2455,6 +2477,119 @@ var smsRegistrationChangedEvent = import_zod3.z.strictObject({
   data: smsRegistrationEnvelope
 });
 
+// src/types/billing-switch.ts
+var import_zod4 = require("zod");
+var PLAN_SWITCH_INTERVALS = ["month", "year"];
+var intervalField = import_zod4.z.enum(PLAN_SWITCH_INTERVALS);
+var planSwitchPreviewQuerySchema = import_zod4.z.object({
+  targetPlanSlug: import_zod4.z.string().trim().min(1),
+  interval: intervalField.optional()
+}).strict();
+var planSwitchRequestSchema = import_zod4.z.object({
+  targetPlanSlug: import_zod4.z.string().min(1),
+  /** Absent = the current interval. */
+  interval: intervalField.optional(),
+  idempotencyKey: import_zod4.z.string().min(8).max(200),
+  previewId: import_zod4.z.string().min(1).optional(),
+  confirmedChargeChange: import_zod4.z.unknown().optional()
+}).strict();
+var PLAN_SWITCH_ERROR_CODES = [
+  "invalid_body",
+  "idempotency_key_reused",
+  "switch_not_allowed",
+  "contact_sales",
+  "members_exceed_target",
+  "addon_price_not_configured",
+  "billing_mode_classic",
+  "already_on_plan",
+  "confirmation_required",
+  "preview_stale",
+  "preview_consumed",
+  "stale_switch",
+  "switch_in_progress",
+  "payment_failed",
+  "provider_unreadable",
+  "not_armed",
+  "use_plan_switch",
+  "operation_not_found"
+];
+var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"];
+var previewStaleErrorSchema = import_zod4.z.object({
+  error: import_zod4.z.literal("preview_stale"),
+  reason: import_zod4.z.string().optional()
+});
+var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
+var addOnQuantityRequestSchema = import_zod4.z.object({
+  quantity: import_zod4.z.number().int().nonnegative(),
+  quantityRev: import_zod4.z.union([import_zod4.z.number().int().nonnegative(), import_zod4.z.string().regex(/^\d{1,18}$/)])
+}).strict();
+var addOnQuantityResponseSchema = import_zod4.z.object({
+  tenantAddOnId: import_zod4.z.string(),
+  /** The quantity this revision asked for. */
+  quantity: import_zod4.z.number().int().nonnegative(),
+  /** The revision, as a decimal string. */
+  quantityRev: import_zod4.z.string(),
+  /** What Stripe bills now. */
+  billedQuantity: import_zod4.z.number().int().nonnegative(),
+  /** A newer revision already superseded this one; Stripe converges on the newest. */
+  superseded: import_zod4.z.boolean(),
+  /** X1: the TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). Absent from R1. */
+  status: import_zod4.z.string().optional(),
+  /** X1: true when quantity 0 ended the add-on's own subscription. Absent from R1. */
+  subscriptionCanceled: import_zod4.z.boolean().optional()
+});
+var ADDON_QUANTITY_ERROR_CODES = [
+  "members_exceed_quantity",
+  "extra_mlos_exceed_quantity",
+  "stale_quantity_rev",
+  "contact_sales",
+  "included_in_plan",
+  "addon_price_not_configured",
+  "addon_not_found",
+  "addon_not_active",
+  "addon_state_unknown",
+  "quantity_not_supported",
+  "payment_method_required",
+  "stripe_failed"
+];
+var ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES = [
+  "IDEMPOTENCY_KEY_REQUIRED",
+  "IDEMPOTENCY_KEY_INVALID",
+  "IDEMPOTENCY_KEY_CONFLICT"
+];
+var extraMlosExceedQuantityErrorSchema = import_zod4.z.object({
+  success: import_zod4.z.literal(false),
+  error: import_zod4.z.string(),
+  code: import_zod4.z.literal("extra_mlos_exceed_quantity"),
+  activeLoginless: import_zod4.z.number().int().nonnegative(),
+  quantity: import_zod4.z.number().int().nonnegative()
+});
+var membersExceedQuantityErrorSchema = import_zod4.z.object({
+  success: import_zod4.z.literal(false),
+  error: import_zod4.z.string(),
+  code: import_zod4.z.literal("members_exceed_quantity"),
+  activeMembers: import_zod4.z.number().int().nonnegative(),
+  quantity: import_zod4.z.number().int().nonnegative()
+});
+var addOnQuantityOtherErrorSchema = import_zod4.z.object({
+  success: import_zod4.z.literal(false).optional(),
+  /** Human-readable. */
+  error: import_zod4.z.string(),
+  code: import_zod4.z.string().optional()
+}).loose();
+var addOnQuantityErrorSchema = import_zod4.z.union([
+  extraMlosExceedQuantityErrorSchema,
+  membersExceedQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema
+]);
+function isExtraMlosExceedQuantityError(e) {
+  return extraMlosExceedQuantityErrorSchema.safeParse(e).success;
+}
+function isMembersExceedQuantityError(e) {
+  return membersExceedQuantityErrorSchema.safeParse(e).success;
+}
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2464,8 +2599,15 @@ function createServiceClient(config) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource,
   AuthResource,
+  PLAN_SWITCH_ERROR_CODES,
+  PLAN_SWITCH_INTERVALS,
+  PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS,
   ROSTER_ERROR_CODES,
   RelloAuthError,
@@ -2477,6 +2619,10 @@ function createServiceClient(config) {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  addOnQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema,
+  addOnQuantityRequestSchema,
+  addOnQuantityResponseSchema,
   agentProvisionPayloadSchema,
   businessIndustry,
   businessType,
@@ -2487,6 +2633,7 @@ function createServiceClient(config) {
   createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
+  extraMlosExceedQuantityErrorSchema,
   feeChangedConflict,
   feeNotFound,
   feeSlugQuery,
@@ -2501,11 +2648,17 @@ function createServiceClient(config) {
   getRelloBaseUrl,
   hasPropertyEngineCredentials,
   internalError,
+  isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError,
   loginlessAgentCreateRequestSchema,
   loginlessAgentRemoveRequestSchema,
+  membersExceedQuantityErrorSchema,
   oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,
+  planSwitchPreviewQuerySchema,
+  planSwitchRequestSchema,
+  previewStaleErrorSchema,
   provisionedAgentSchema,
   quoteVersion,
   registrationConflict,
