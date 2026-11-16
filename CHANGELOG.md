@@ -6,6 +6,59 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.34.0 — 2026-11-16
+
+### Added — the G-SETUP + G-A2P contract: setup charge and texting registration (PFP Gateway)
+
+Plan a6-1143 §D (Platform KA prompts 1143 / 1160 / 1172), spec
+SPEC-PFP-GATEWAY.md rev 10.31 §4.12d item 6, the Platform KA's 2044Z contract
+pins, H-173, GD-1761 and GD-1763. One contract for Rello's routes and
+PathfinderPro's callers and receivers: `src/types/sms-setup.ts`.
+
+- Charge lane: `setupChargeRequest` (strict, no amount, `quoteVersion`
+  required), `setupChargeStatus` (7 values incl. `voided`),
+  `setupChargeEnvelope`, `chargeConflict`.
+- The fee GET (`GET /api/provisioning/setup-charge/fee`) is contract:
+  `feeSlugQuery` (the tenant comes from the key, never a parameter),
+  `oneTimeFeeQuote` (with `quoteVersion`), `feeNotFound`, `internalError`
+  (`requestId` required).
+- H-173: `quoteVersion` on the quote and on the POST body;
+  `feeChangedConflict` = `409 { error: "fee_changed", quote }` with the CURRENT
+  quote (also when `isActive: false`). It replaces `fee_inactive`.
+- GD-1763: `business_suspension_final` is a code in both `chargeConflict` and
+  `registrationConflict`, with that lane's envelope or `null` when the MLO has
+  no row in it (POST sms-registration, POST setup-charge, POST …/otp). No new
+  wire status: waiting MLOs read `rejected`, then `refunded`.
+- Registration lane: `smsRegistrationRequest` (strict; `attachToBusiness` and
+  any other unknown key are refused; a bare 2nd+ MLO STANDARD body parses and the
+  route decides CREATE 400 field `business` / ATTACH server-side; the business
+  pair travels together; an LLC as a sole proprietor names `brandType`),
+  `smsOtpRequest`, `smsRegistrationStatus` (13 values incl. `number_pending`
+  and `suspended`; a LIVE MLO on a suspended business displays `suspended` with
+  `phoneNumber: null`), `smsRegistrationEnvelope`, `registrationConflict`,
+  `businessType`, `businessIndustry`.
+- GD-1761: an ambiguous provider create has no wire status.
+- Events: `setupChargeChangedEvent` (`billing.setup_charge_changed`) and
+  `smsRegistrationChangedEvent` (`sms.registration_changed`).
+- Rello's admin bodies (§D.3) are Rello-internal and are not exported.
+
+### Changed — the package's own `@rello-platform/permissions` re-pinned v0.60.0 → v0.62.0
+
+Additive only (+3 slugs, none removed): `billing:setup-charge:write` and
+`sms:registration:write` (v0.61.0), `billing:plan-switch:write` (v0.62.0).
+`createServiceBearerGuard` / `callerHasPermission` are typed against this
+package's own copy, which npm nests under api-client, so a consumer's newer pin
+does not reach the guard's union (the v2.32.0 lesson). No billing-client bump.
+
+Version: v2.34.0 was free when this opened (latest tag v2.33.0; open PR #10
+still names 2.29.0 and takes the next free number when it merges). Whichever
+PR merges second re-versions.
+
+Test: `tests/g-a2p-setup-charge-sms-registration.test.mjs` (12 tests). Red at
+v2.33.0 (11 of 12 fail; the 12th asserts the admin bodies are NOT exported),
+green here. Mutants, each red then restored: `quoteVersion` dropped from the
+POST body; `attachToBusiness` let through; `fee_changed`'s `quote` made optional.
+
 ## v2.33.0 — 2026-11-15
 
 ### Added — `loginless` on the provisioned agent, and the X2 roster route contract (PFP Gateway X2)

@@ -213,6 +213,50 @@ export type {
 } from "./types/index.js";
 
 
+// PFP Gateway G-SETUP + G-A2P (setup charge, texting registration)
+export {
+  quoteVersion,
+  setupChargeRequest,
+  setupChargeStatus,
+  setupChargeEnvelope,
+  chargeConflict,
+  feeSlugQuery,
+  oneTimeFeeQuote,
+  feeChangedConflict,
+  feeNotFound,
+  internalError,
+  businessType,
+  businessIndustry,
+  smsRegistrationRequest,
+  smsOtpRequest,
+  smsRegistrationStatus,
+  smsRegistrationEnvelope,
+  registrationConflict,
+  setupChargeChangedEvent,
+  smsRegistrationChangedEvent,
+} from "./types/index.js";
+export type {
+  SetupChargeRequest,
+  SetupChargeStatus,
+  SetupChargeEnvelope,
+  ChargeConflict,
+  FeeSlugQuery,
+  OneTimeFeeQuote,
+  FeeChangedConflict,
+  FeeNotFound,
+  InternalError,
+  BusinessType,
+  BusinessIndustry,
+  SmsRegistrationRequest,
+  SmsOtpRequest,
+  SmsRegistrationStatus,
+  SmsRegistrationEnvelope,
+  RegistrationConflict,
+  SetupChargeChangedEvent,
+  SmsRegistrationChangedEvent,
+} from "./types/index.js";
+
+
 // Implicit-apiKey telemetry — lets a process be ASKED how many construction
 // sites still rely on the RELLO_API_KEY fallback, rather than tailing a log a
 // Trigger.dev worker writes to nobody. See implicit-apikey-telemetry.ts.
