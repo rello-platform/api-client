@@ -2726,6 +2726,565 @@ interface LoginQuantityNeeded extends RosterError {
 }
 
 /**
+ * PFP Gateway G-SETUP + G-A2P: the one-time setup charge and the texting (A2P
+ * 10DLC) registration that PathfinderPro asks Rello for. One contract for Rello's
+ * routes and PFP's callers and receivers.
+ *
+ * Source: plan a6-1143 §D (Platform KA prompts 1143 / 1160 / 1172), spec
+ * SPEC-PFP-GATEWAY.md rev 10.31 §4.12d item 6, the Platform KA's 2044Z contract
+ * pins (fee GET is contract; attach is decided server-side), H-173 (quoteVersion,
+ * 409 fee_changed), GD-1763 (409 business_suspension_final) and GD-1761
+ * (an ambiguous provider create has no wire status).
+ *
+ * ONE envelope per lane. The same envelope is the event `data`, every route
+ * answer and the GET, ordered by `rev` (per tenant, agent and lane).
+ *
+ * Auth on every route: `Authorization: Bearer <ApiKey>` (Rello's ApiKey table,
+ * targetApp RELLO, appSource pathfinder-pro), permission
+ * `billing:setup-charge:write` (charge lane, incl. the fee GET) or
+ * `sms:registration:write` (registration lane), from @rello-platform/permissions
+ * v0.61.0+. The tenant is checked against the key; the fee GET takes it from
+ * the key alone.
+ *
+ *   GET  /api/provisioning/setup-charge/fee?feeSlug=…   → oneTimeFeeQuote
+ *   POST /api/provisioning/setup-charge                 → setupChargeEnvelope
+ *   GET  /api/provisioning/setup-charge?tenantId&relloAgentId&feeSlug
+ *   POST /api/provisioning/sms-registration             → smsRegistrationEnvelope
+ *   POST /api/provisioning/sms-registration/otp         → smsRegistrationEnvelope
+ *   GET  /api/provisioning/sms-registration?tenantId&relloAgentId
+ *   events on Rello's billing outbox: billing.setup_charge_changed, sms.registration_changed
+ *
+ * Rello's admin bodies (fee create/patch, manual settle, suspension outcomes,
+ * provider-create outcome) are Rello-internal and are NOT in this package.
+ *
+ * Module-level helpers carry an `smsSetup` prefix so tsup renames nothing else
+ * in the bundle.
+ */
+
+/**
+ * H-173: the fee row's version. Rello's DB trigger bumps it on any change of the
+ * amount, the currency or isActive. PFP echoes the version the MLO confirmed.
+ */
+declare const quoteVersion: z.ZodNumber;
+/**
+ * POST /api/provisioning/setup-charge body. Strict: an unknown key is
+ * `400 { error: "invalid_field", field, message }`. There is NO amount: Rello
+ * charges the fee row's amount, read server-side. `quoteVersion` is required
+ * (missing → 400 field "quoteVersion").
+ */
+declare const setupChargeRequest: z.ZodObject<{
+    tenantId: z.ZodString;
+    relloAgentId: z.ZodString;
+    feeSlug: z.ZodString;
+    quoteVersion: z.ZodNumber;
+}, z.core.$strict>;
+type SetupChargeRequest = z.infer<typeof setupChargeRequest>;
+/**
+ * `voided`: a MANUAL charge whose hand invoice was never paid (show "No charge
+ * was made"). `refunded`: the fee came back (registration could not complete).
+ */
+declare const setupChargeStatus: z.ZodEnum<{
+    failed: "failed";
+    unknown: "unknown";
+    pending: "pending";
+    paid: "paid";
+    manual: "manual";
+    refunded: "refunded";
+    voided: "voided";
+}>;
+type SetupChargeStatus = z.infer<typeof setupChargeStatus>;
+/** The charge envelope: billing.setup_charge_changed `data`, every setup-charge answer body, and the GET. */
+declare const setupChargeEnvelope: z.ZodObject<{
+    tenantId: z.ZodString;
+    relloAgentId: z.ZodString;
+    feeSlug: z.ZodString;
+    status: z.ZodEnum<{
+        failed: "failed";
+        unknown: "unknown";
+        pending: "pending";
+        paid: "paid";
+        manual: "manual";
+        refunded: "refunded";
+        voided: "voided";
+    }>;
+    /** true only when a PAID row is asked again. */
+    alreadyPaid: z.ZodOptional<z.ZodBoolean>;
+    /** failed: Stripe's decline message (never card data); manual: the reason in words. */
+    message: z.ZodOptional<z.ZodString>;
+    chargeId: z.ZodNullable<z.ZodString>;
+    rev: z.ZodNumber;
+    /** Display only; order by `rev`. */
+    occurredAt: z.ZodISODateTime;
+}, z.core.$strict>;
+type SetupChargeEnvelope = z.infer<typeof setupChargeEnvelope>;
+/**
+ * POST setup-charge answers:
+ *   200 paid | paid + alreadyPaid | manual | refunded     202 pending | unknown     402 failed
+ *   400 { error: "invalid_field", field, message }   401 { error }   403 { error }
+ *   404 { error: "agent_not_found" } | feeNotFound
+ *   409 { error: "registration_required" }  (rate-check fee with no registration for the agent)
+ *   409 feeChangedConflict                  (H-173: stale quoteVersion or inactive fee; no charge, no Stripe call)
+ *   409 chargeConflict                      (below)
+ *   500 internalError
+ * An existing charge's own answer (200 alreadyPaid / 202 / 409 refund_in_progress)
+ * comes before fee_changed: a retried POST for money already taken is never fee_changed.
+ *
+ * chargeConflict codes:
+ *   registration_rejected     the registration attempt is terminal and not live; re-submit details first
+ *   refund_in_progress        the previous attempt's refund is still out
+ *   business_suspended        the team's business is suspended at Twilio
+ *   business_suspension_final GD-1763: closed by the carriers; no charge until Rello's operator records
+ *                             the provider outcome
+ * `envelope` is this MLO's charge envelope, or null when the MLO has no charge row.
+ */
+declare const chargeConflict: z.ZodObject<{
+    error: z.ZodEnum<{
+        registration_rejected: "registration_rejected";
+        refund_in_progress: "refund_in_progress";
+        business_suspended: "business_suspended";
+        business_suspension_final: "business_suspension_final";
+    }>;
+    envelope: z.ZodNullable<z.ZodObject<{
+        tenantId: z.ZodString;
+        relloAgentId: z.ZodString;
+        feeSlug: z.ZodString;
+        status: z.ZodEnum<{
+            failed: "failed";
+            unknown: "unknown";
+            pending: "pending";
+            paid: "paid";
+            manual: "manual";
+            refunded: "refunded";
+            voided: "voided";
+        }>;
+        /** true only when a PAID row is asked again. */
+        alreadyPaid: z.ZodOptional<z.ZodBoolean>;
+        /** failed: Stripe's decline message (never card data); manual: the reason in words. */
+        message: z.ZodOptional<z.ZodString>;
+        chargeId: z.ZodNullable<z.ZodString>;
+        rev: z.ZodNumber;
+        /** Display only; order by `rev`. */
+        occurredAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+type ChargeConflict = z.infer<typeof chargeConflict>;
+/**
+ * GET /api/provisioning/setup-charge/fee?feeSlug=… query. The tenant comes from
+ * the ApiKey row, never a parameter. Missing or malformed → 400 field "feeSlug".
+ */
+declare const feeSlugQuery: z.ZodObject<{
+    feeSlug: z.ZodString;
+}, z.core.$strict>;
+type FeeSlugQuery = z.infer<typeof feeSlugQuery>;
+/**
+ * 200 of the fee GET, and the `quote` of 409 fee_changed. `isActive: false` =
+ * not offered now. The amount is the row's, never a default or a cached price
+ * (an unreadable row is 500, never a quote).
+ */
+declare const oneTimeFeeQuote: z.ZodObject<{
+    feeSlug: z.ZodString;
+    label: z.ZodString;
+    amountCents: z.ZodNumber;
+    currency: z.ZodString;
+    isActive: z.ZodBoolean;
+    quoteVersion: z.ZodNumber;
+}, z.core.$strict>;
+type OneTimeFeeQuote = z.infer<typeof oneTimeFeeQuote>;
+/**
+ * H-173: 409 on POST setup-charge when the body's quoteVersion is not the fee
+ * row's, or the row is inactive. `quote` is the CURRENT row: PFP shows it for a
+ * fresh confirmation and never retries on its own. Replaces `fee_inactive`.
+ */
+declare const feeChangedConflict: z.ZodObject<{
+    error: z.ZodLiteral<"fee_changed">;
+    quote: z.ZodObject<{
+        feeSlug: z.ZodString;
+        label: z.ZodString;
+        amountCents: z.ZodNumber;
+        currency: z.ZodString;
+        isActive: z.ZodBoolean;
+        quoteVersion: z.ZodNumber;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+type FeeChangedConflict = z.infer<typeof feeChangedConflict>;
+/** 404 of the fee GET and of POST setup-charge: no such fee row. */
+declare const feeNotFound: z.ZodObject<{
+    error: z.ZodLiteral<"fee_not_found">;
+}, z.core.$strict>;
+type FeeNotFound = z.infer<typeof feeNotFound>;
+/** 500 on every G-SETUP / G-A2P route: never internals. PFP shows "unknown", never "not paid". */
+declare const internalError: z.ZodObject<{
+    error: z.ZodString;
+    requestId: z.ZodString;
+}, z.core.$strict>;
+type InternalError = z.infer<typeof internalError>;
+/** Twilio's business types for a STANDARD brand. */
+declare const businessType: z.ZodEnum<{
+    "Co-operative": "Co-operative";
+    Corporation: "Corporation";
+    "Limited Liability Corporation": "Limited Liability Corporation";
+    "Non-profit Corporation": "Non-profit Corporation";
+    Partnership: "Partnership";
+}>;
+type BusinessType = z.infer<typeof businessType>;
+/** Twilio's business industries. */
+declare const businessIndustry: z.ZodEnum<{
+    AGRICULTURE: "AGRICULTURE";
+    AUTOMOTIVE: "AUTOMOTIVE";
+    BANKING: "BANKING";
+    CONSTRUCTION: "CONSTRUCTION";
+    CONSUMER: "CONSUMER";
+    EDUCATION: "EDUCATION";
+    ELECTRONICS: "ELECTRONICS";
+    ENGINEERING: "ENGINEERING";
+    ENERGY: "ENERGY";
+    FAST_MOVING_CONSUMER_GOODS: "FAST_MOVING_CONSUMER_GOODS";
+    FINANCIAL: "FINANCIAL";
+    FINTECH: "FINTECH";
+    FOOD_AND_BEVERAGE: "FOOD_AND_BEVERAGE";
+    GOVERNMENT: "GOVERNMENT";
+    HEALTHCARE: "HEALTHCARE";
+    HOSPITALITY: "HOSPITALITY";
+    INSURANCE: "INSURANCE";
+    JEWELRY: "JEWELRY";
+    LEGAL: "LEGAL";
+    MANUFACTURING: "MANUFACTURING";
+    MEDIA: "MEDIA";
+    NOT_FOR_PROFIT: "NOT_FOR_PROFIT";
+    OIL_AND_GAS: "OIL_AND_GAS";
+    ONLINE: "ONLINE";
+    PROFESSIONAL_SERVICES: "PROFESSIONAL_SERVICES";
+    RAW_MATERIALS: "RAW_MATERIALS";
+    REAL_ESTATE: "REAL_ESTATE";
+    RELIGION: "RELIGION";
+    RETAIL: "RETAIL";
+    TECHNOLOGY: "TECHNOLOGY";
+    TELECOMMUNICATIONS: "TELECOMMUNICATIONS";
+    TRANSPORTATION: "TRANSPORTATION";
+    TRAVEL: "TRAVEL";
+}>;
+type BusinessIndustry = z.infer<typeof businessIndustry>;
+/**
+ * POST /api/provisioning/sms-registration body. Strict: an unknown key (e.g.
+ * `attachToBusiness`) is `400 invalid_field`.
+ *
+ * STANDARD: a team shares one business registration. The team's FIRST loan
+ * officer sends `business` + `authorizedRep`; a 2nd+ loan officer omits both.
+ * Whether the tenant already has a business registration is a DB fact, so the
+ * ROUTE decides the branch server-side (never a client flag):
+ *   no business row, no business block   → 400 field "business"
+ *   business row exists, block sent       → 400 field "business" (never merged or overwritten)
+ * Here, the two blocks travel together or not at all.
+ *
+ * SOLE_PROPRIETOR: `soleProprietor` is required; an LLC business type is refused
+ * on `brandType` ("An LLC must register with its EIN.") as the FIRST issue.
+ */
+declare const smsRegistrationRequest: z.ZodObject<{
+    tenantId: z.ZodString;
+    relloAgentId: z.ZodString;
+    brandType: z.ZodEnum<{
+        STANDARD: "STANDARD";
+        SOLE_PROPRIETOR: "SOLE_PROPRIETOR";
+    }>;
+    business: z.ZodOptional<z.ZodObject<{
+        /** Exactly as on the IRS CP 575. */
+        legalName: z.ZodString;
+        businessType: z.ZodEnum<{
+            "Co-operative": "Co-operative";
+            Corporation: "Corporation";
+            "Limited Liability Corporation": "Limited Liability Corporation";
+            "Non-profit Corporation": "Non-profit Corporation";
+            Partnership: "Partnership";
+        }>;
+        industry: z.ZodEnum<{
+            AGRICULTURE: "AGRICULTURE";
+            AUTOMOTIVE: "AUTOMOTIVE";
+            BANKING: "BANKING";
+            CONSTRUCTION: "CONSTRUCTION";
+            CONSUMER: "CONSUMER";
+            EDUCATION: "EDUCATION";
+            ELECTRONICS: "ELECTRONICS";
+            ENGINEERING: "ENGINEERING";
+            ENERGY: "ENERGY";
+            FAST_MOVING_CONSUMER_GOODS: "FAST_MOVING_CONSUMER_GOODS";
+            FINANCIAL: "FINANCIAL";
+            FINTECH: "FINTECH";
+            FOOD_AND_BEVERAGE: "FOOD_AND_BEVERAGE";
+            GOVERNMENT: "GOVERNMENT";
+            HEALTHCARE: "HEALTHCARE";
+            HOSPITALITY: "HOSPITALITY";
+            INSURANCE: "INSURANCE";
+            JEWELRY: "JEWELRY";
+            LEGAL: "LEGAL";
+            MANUFACTURING: "MANUFACTURING";
+            MEDIA: "MEDIA";
+            NOT_FOR_PROFIT: "NOT_FOR_PROFIT";
+            OIL_AND_GAS: "OIL_AND_GAS";
+            ONLINE: "ONLINE";
+            PROFESSIONAL_SERVICES: "PROFESSIONAL_SERVICES";
+            RAW_MATERIALS: "RAW_MATERIALS";
+            REAL_ESTATE: "REAL_ESTATE";
+            RELIGION: "RELIGION";
+            RETAIL: "RETAIL";
+            TECHNOLOGY: "TECHNOLOGY";
+            TELECOMMUNICATIONS: "TELECOMMUNICATIONS";
+            TRANSPORTATION: "TRANSPORTATION";
+            TRAVEL: "TRAVEL";
+        }>;
+        ein: z.ZodString;
+        websiteUrl: z.ZodURL;
+        companyType: z.ZodEnum<{
+            private: "private";
+            public: "public";
+            "non-profit": "non-profit";
+        }>;
+        stockExchange: z.ZodOptional<z.ZodString>;
+        stockTicker: z.ZodOptional<z.ZodString>;
+        brandContactEmail: z.ZodOptional<z.ZodEmail>;
+        address: z.ZodObject<{
+            street: z.ZodString;
+            street2: z.ZodOptional<z.ZodString>;
+            city: z.ZodString;
+            region: z.ZodString;
+            postalCode: z.ZodString;
+            country: z.ZodLiteral<"US">;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
+    authorizedRep: z.ZodOptional<z.ZodObject<{
+        firstName: z.ZodString;
+        lastName: z.ZodString;
+        businessTitle: z.ZodString;
+        jobPosition: z.ZodEnum<{
+            Director: "Director";
+            GM: "GM";
+            VP: "VP";
+            CEO: "CEO";
+            CFO: "CFO";
+            "General Counsel": "General Counsel";
+            Other: "Other";
+        }>;
+        phone: z.ZodString;
+        email: z.ZodEmail;
+    }, z.core.$strict>>;
+    soleProprietor: z.ZodOptional<z.ZodObject<{
+        firstName: z.ZodString;
+        lastName: z.ZodString;
+        brandName: z.ZodString;
+        email: z.ZodEmail;
+        phone: z.ZodString;
+        /** Receives Twilio's YES text; can't be a Twilio/CPaaS number; ≤ 3 uses across TCR. */
+        mobilePhone: z.ZodString;
+        address: z.ZodObject<{
+            street: z.ZodString;
+            street2: z.ZodOptional<z.ZodString>;
+            city: z.ZodString;
+            region: z.ZodString;
+            postalCode: z.ZodString;
+            country: z.ZodLiteral<"US">;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+type SmsRegistrationRequest = z.infer<typeof smsRegistrationRequest>;
+/** POST /api/provisioning/sms-registration/otp body (sole proprietor: send a new code). */
+declare const smsOtpRequest: z.ZodObject<{
+    tenantId: z.ZodString;
+    relloAgentId: z.ZodString;
+}, z.core.$strict>;
+type SmsOtpRequest = z.infer<typeof smsOtpRequest>;
+/**
+ * `number_pending`: the team's business is approved; this loan officer's number
+ * is being set up.
+ * `suspended`: the brand or campaign is suspended at Twilio. Not terminal, no
+ * refund, no new charge. A LIVE loan officer on a suspended business also
+ * DISPLAYS `suspended` with `phoneNumber: null` (its row stays live for money,
+ * is never refunded, and shows `live` again on reinstatement).
+ * A suspension FINAL adds no status: waiting loan officers read `rejected`, then
+ * `refunded`. An ambiguous provider create adds no status either.
+ */
+declare const smsRegistrationStatus: z.ZodEnum<{
+    refunded: "refunded";
+    details_received: "details_received";
+    payment_pending: "payment_pending";
+    submitted: "submitted";
+    brand_pending: "brand_pending";
+    brand_approved: "brand_approved";
+    otp_pending: "otp_pending";
+    campaign_pending: "campaign_pending";
+    number_pending: "number_pending";
+    live: "live";
+    action_needed: "action_needed";
+    suspended: "suspended";
+    rejected: "rejected";
+}>;
+type SmsRegistrationStatus = z.infer<typeof smsRegistrationStatus>;
+/** The registration envelope: sms.registration_changed `data`, the registration and OTP route answers, and the GET. */
+declare const smsRegistrationEnvelope: z.ZodObject<{
+    tenantId: z.ZodString;
+    relloAgentId: z.ZodString;
+    brandType: z.ZodEnum<{
+        STANDARD: "STANDARD";
+        SOLE_PROPRIETOR: "SOLE_PROPRIETOR";
+    }>;
+    status: z.ZodEnum<{
+        refunded: "refunded";
+        details_received: "details_received";
+        payment_pending: "payment_pending";
+        submitted: "submitted";
+        brand_pending: "brand_pending";
+        brand_approved: "brand_approved";
+        otp_pending: "otp_pending";
+        campaign_pending: "campaign_pending";
+        number_pending: "number_pending";
+        live: "live";
+        action_needed: "action_needed";
+        suspended: "suspended";
+        rejected: "rejected";
+    }>;
+    /** Twilio's code + text, sanitized. */
+    reason: z.ZodNullable<z.ZodString>;
+    fieldsToFix: z.ZodNullable<z.ZodArray<z.ZodString>>;
+    /** STANDARD: 3 − the BUSINESS's used count (shared by the team); SOLE_PROPRIETOR: null. */
+    remainingFreeUpdates: z.ZodNullable<z.ZodNumber>;
+    /** Only when `live`. */
+    phoneNumber: z.ZodNullable<z.ZodString>;
+    /** Only for SOLE_PROPRIETOR. Expires 24 h after; a new code is available 60 s after. */
+    otpSentAt: z.ZodNullable<z.ZodISODateTime>;
+    rev: z.ZodNumber;
+    occurredAt: z.ZodISODateTime;
+}, z.core.$strict>;
+type SmsRegistrationEnvelope = z.infer<typeof smsRegistrationEnvelope>;
+/**
+ * 409 on POST sms-registration and POST sms-registration/otp:
+ *   business_rejected         the business is rejected; send the business details again (RENEW)
+ *   business_suspended        suspended at Twilio; no write, no charge, no Twilio call
+ *   business_suspension_final GD-1763: closed by the carriers; ANY body is refused until Rello's
+ *                             operator records the provider outcome; then fresh business details renew once
+ *   in_review                 submitted … campaign_pending, otp_pending, live
+ *   no_free_updates           action_needed on a brand fix with 0 free updates left
+ *   not_otp_pending           OTP route: the registration is not waiting for a code
+ * `envelope` is null only when this MLO has no registration row yet.
+ * Other answers: 400 invalid_field · 401 · 403 · 404 agent_not_found ·
+ * 409 { error: "agent_not_eligible" } · OTP 429 { error: "otp_recently_sent", retryAfterSeconds } ·
+ * OTP 502 { error: "twilio_unavailable", retryable: true } · 500 internalError.
+ */
+declare const registrationConflict: z.ZodObject<{
+    error: z.ZodEnum<{
+        business_suspended: "business_suspended";
+        business_suspension_final: "business_suspension_final";
+        business_rejected: "business_rejected";
+        in_review: "in_review";
+        no_free_updates: "no_free_updates";
+        not_otp_pending: "not_otp_pending";
+    }>;
+    envelope: z.ZodNullable<z.ZodObject<{
+        tenantId: z.ZodString;
+        relloAgentId: z.ZodString;
+        brandType: z.ZodEnum<{
+            STANDARD: "STANDARD";
+            SOLE_PROPRIETOR: "SOLE_PROPRIETOR";
+        }>;
+        status: z.ZodEnum<{
+            refunded: "refunded";
+            details_received: "details_received";
+            payment_pending: "payment_pending";
+            submitted: "submitted";
+            brand_pending: "brand_pending";
+            brand_approved: "brand_approved";
+            otp_pending: "otp_pending";
+            campaign_pending: "campaign_pending";
+            number_pending: "number_pending";
+            live: "live";
+            action_needed: "action_needed";
+            suspended: "suspended";
+            rejected: "rejected";
+        }>;
+        /** Twilio's code + text, sanitized. */
+        reason: z.ZodNullable<z.ZodString>;
+        fieldsToFix: z.ZodNullable<z.ZodArray<z.ZodString>>;
+        /** STANDARD: 3 − the BUSINESS's used count (shared by the team); SOLE_PROPRIETOR: null. */
+        remainingFreeUpdates: z.ZodNullable<z.ZodNumber>;
+        /** Only when `live`. */
+        phoneNumber: z.ZodNullable<z.ZodString>;
+        /** Only for SOLE_PROPRIETOR. Expires 24 h after; a new code is available 60 s after. */
+        otpSentAt: z.ZodNullable<z.ZodISODateTime>;
+        rev: z.ZodNumber;
+        occurredAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+}, z.core.$strict>;
+type RegistrationConflict = z.infer<typeof registrationConflict>;
+/** Envelope occurredAt = data.occurredAt. */
+declare const setupChargeChangedEvent: z.ZodObject<{
+    id: z.ZodUUID;
+    type: z.ZodLiteral<"billing.setup_charge_changed">;
+    tenantId: z.ZodString;
+    occurredAt: z.ZodISODateTime;
+    data: z.ZodObject<{
+        tenantId: z.ZodString;
+        relloAgentId: z.ZodString;
+        feeSlug: z.ZodString;
+        status: z.ZodEnum<{
+            failed: "failed";
+            unknown: "unknown";
+            pending: "pending";
+            paid: "paid";
+            manual: "manual";
+            refunded: "refunded";
+            voided: "voided";
+        }>;
+        /** true only when a PAID row is asked again. */
+        alreadyPaid: z.ZodOptional<z.ZodBoolean>;
+        /** failed: Stripe's decline message (never card data); manual: the reason in words. */
+        message: z.ZodOptional<z.ZodString>;
+        chargeId: z.ZodNullable<z.ZodString>;
+        rev: z.ZodNumber;
+        /** Display only; order by `rev`. */
+        occurredAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+type SetupChargeChangedEvent = z.infer<typeof setupChargeChangedEvent>;
+declare const smsRegistrationChangedEvent: z.ZodObject<{
+    id: z.ZodUUID;
+    type: z.ZodLiteral<"sms.registration_changed">;
+    tenantId: z.ZodString;
+    occurredAt: z.ZodISODateTime;
+    data: z.ZodObject<{
+        tenantId: z.ZodString;
+        relloAgentId: z.ZodString;
+        brandType: z.ZodEnum<{
+            STANDARD: "STANDARD";
+            SOLE_PROPRIETOR: "SOLE_PROPRIETOR";
+        }>;
+        status: z.ZodEnum<{
+            refunded: "refunded";
+            details_received: "details_received";
+            payment_pending: "payment_pending";
+            submitted: "submitted";
+            brand_pending: "brand_pending";
+            brand_approved: "brand_approved";
+            otp_pending: "otp_pending";
+            campaign_pending: "campaign_pending";
+            number_pending: "number_pending";
+            live: "live";
+            action_needed: "action_needed";
+            suspended: "suspended";
+            rejected: "rejected";
+        }>;
+        /** Twilio's code + text, sanitized. */
+        reason: z.ZodNullable<z.ZodString>;
+        fieldsToFix: z.ZodNullable<z.ZodArray<z.ZodString>>;
+        /** STANDARD: 3 − the BUSINESS's used count (shared by the team); SOLE_PROPRIETOR: null. */
+        remainingFreeUpdates: z.ZodNullable<z.ZodNumber>;
+        /** Only when `live`. */
+        phoneNumber: z.ZodNullable<z.ZodString>;
+        /** Only for SOLE_PROPRIETOR. Expires 24 h after; a new code is available 60 s after. */
+        otpSentAt: z.ZodNullable<z.ZodISODateTime>;
+        rev: z.ZodNumber;
+        occurredAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+type SmsRegistrationChangedEvent = z.infer<typeof smsRegistrationChangedEvent>;
+
+/**
  * implicit-apikey-telemetry — make the implicit-RELLO_API_KEY fallback COUNTABLE.
  *
  * WHY A WARNING ALONE IS NOT ENOUGH
@@ -2799,4 +3358,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type CanSendInput, type CanSendResult, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SignatureQuantityNeeded, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, callerHasPermission, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };

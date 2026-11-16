@@ -2158,6 +2158,206 @@ var ROSTER_ERROR_CODES = [
   // 500: nothing was saved; try again
 ];
 
+// src/types/sms-setup.ts
+import { z as z3 } from "zod";
+var smsSetupId = z3.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+var smsSetupSlug = z3.string().min(1).max(64).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+var smsSetupTime = z3.iso.datetime({ offset: true });
+var smsSetupRev = z3.number().int().min(1);
+var quoteVersion = z3.number().int().min(1);
+var setupChargeRequest = z3.strictObject({
+  tenantId: smsSetupId,
+  relloAgentId: smsSetupId,
+  feeSlug: smsSetupSlug,
+  quoteVersion
+});
+var setupChargeStatus = z3.enum(["pending", "paid", "failed", "unknown", "manual", "refunded", "voided"]);
+var setupChargeEnvelope = z3.strictObject({
+  tenantId: smsSetupId,
+  relloAgentId: smsSetupId,
+  feeSlug: smsSetupSlug,
+  status: setupChargeStatus,
+  /** true only when a PAID row is asked again. */
+  alreadyPaid: z3.boolean().optional(),
+  /** failed: Stripe's decline message (never card data); manual: the reason in words. */
+  message: z3.string().max(500).optional(),
+  chargeId: z3.string().nullable(),
+  rev: smsSetupRev,
+  /** Display only; order by `rev`. */
+  occurredAt: smsSetupTime
+});
+var chargeConflict = z3.strictObject({
+  error: z3.enum(["registration_rejected", "refund_in_progress", "business_suspended", "business_suspension_final"]),
+  envelope: setupChargeEnvelope.nullable()
+});
+var feeSlugQuery = z3.strictObject({ feeSlug: smsSetupSlug });
+var oneTimeFeeQuote = z3.strictObject({
+  feeSlug: smsSetupSlug,
+  label: z3.string().min(1).max(120),
+  amountCents: z3.number().int().positive(),
+  currency: z3.string().regex(/^[a-z]{3}$/),
+  isActive: z3.boolean(),
+  quoteVersion
+});
+var feeChangedConflict = z3.strictObject({ error: z3.literal("fee_changed"), quote: oneTimeFeeQuote });
+var feeNotFound = z3.strictObject({ error: z3.literal("fee_not_found") });
+var internalError = z3.strictObject({ error: z3.string().min(1), requestId: z3.string().min(1) });
+var smsSetupE164Us = z3.string().regex(/^\+1[2-9]\d{9}$/, "Use a US number like +18015550101");
+var smsSetupEmail = z3.email().max(254);
+var smsSetupAddress = z3.strictObject({
+  street: z3.string().min(1).max(100),
+  street2: z3.string().max(100).optional(),
+  city: z3.string().min(1).max(60),
+  region: z3.string().regex(/^[A-Z]{2}$/, "Use the 2-letter state"),
+  postalCode: z3.string().regex(/^\d{5}(-\d{4})?$/),
+  country: z3.literal("US")
+});
+var businessType = z3.enum([
+  "Co-operative",
+  "Corporation",
+  "Limited Liability Corporation",
+  "Non-profit Corporation",
+  "Partnership"
+]);
+var businessIndustry = z3.enum([
+  "AGRICULTURE",
+  "AUTOMOTIVE",
+  "BANKING",
+  "CONSTRUCTION",
+  "CONSUMER",
+  "EDUCATION",
+  "ELECTRONICS",
+  "ENGINEERING",
+  "ENERGY",
+  "FAST_MOVING_CONSUMER_GOODS",
+  "FINANCIAL",
+  "FINTECH",
+  "FOOD_AND_BEVERAGE",
+  "GOVERNMENT",
+  "HEALTHCARE",
+  "HOSPITALITY",
+  "INSURANCE",
+  "JEWELRY",
+  "LEGAL",
+  "MANUFACTURING",
+  "MEDIA",
+  "NOT_FOR_PROFIT",
+  "OIL_AND_GAS",
+  "ONLINE",
+  "PROFESSIONAL_SERVICES",
+  "RAW_MATERIALS",
+  "REAL_ESTATE",
+  "RELIGION",
+  "RETAIL",
+  "TECHNOLOGY",
+  "TELECOMMUNICATIONS",
+  "TRANSPORTATION",
+  "TRAVEL"
+]);
+var smsSetupBusiness = z3.strictObject({
+  /** Exactly as on the IRS CP 575. */
+  legalName: z3.string().min(2).max(255),
+  businessType,
+  industry: businessIndustry,
+  ein: z3.string().regex(/^\d{2}-\d{7}$/, "EIN must look like 12-3456789"),
+  websiteUrl: z3.url().max(255).refine((u) => u.startsWith("https://"), "The website must start with https://"),
+  companyType: z3.enum(["private", "public", "non-profit"]),
+  stockExchange: z3.string().min(1).max(20).optional(),
+  stockTicker: z3.string().min(1).max(10).optional(),
+  brandContactEmail: smsSetupEmail.optional(),
+  address: smsSetupAddress
+});
+var smsSetupAuthorizedRep = z3.strictObject({
+  firstName: z3.string().min(1).max(50),
+  lastName: z3.string().min(1).max(50),
+  businessTitle: z3.string().min(1).max(60),
+  jobPosition: z3.enum(["Director", "GM", "VP", "CEO", "CFO", "General Counsel", "Other"]),
+  phone: smsSetupE164Us,
+  email: smsSetupEmail
+});
+var smsSetupSoleProprietor = z3.strictObject({
+  firstName: z3.string().min(1).max(50),
+  lastName: z3.string().min(1).max(50),
+  brandName: z3.string().min(2).max(255),
+  email: smsSetupEmail,
+  phone: smsSetupE164Us,
+  /** Receives Twilio's YES text; can't be a Twilio/CPaaS number; ≤ 3 uses across TCR. */
+  mobilePhone: smsSetupE164Us,
+  address: smsSetupAddress
+});
+var smsRegistrationRequest = z3.strictObject({
+  tenantId: smsSetupId,
+  relloAgentId: smsSetupId,
+  brandType: z3.enum(["STANDARD", "SOLE_PROPRIETOR"]),
+  business: smsSetupBusiness.optional(),
+  authorizedRep: smsSetupAuthorizedRep.optional(),
+  soleProprietor: smsSetupSoleProprietor.optional()
+}).superRefine((b, ctx) => {
+  const issue = (path, message) => ctx.addIssue({ code: "custom", path, message });
+  if (b.brandType === "STANDARD") {
+    if (b.business && !b.authorizedRep) issue(["authorizedRep"], "An authorized representative is required with the business details");
+    if (b.authorizedRep && !b.business) issue(["business"], "Business details are required with an authorized representative");
+    if (b.soleProprietor) issue(["soleProprietor"], "Send either the EIN details or the sole-proprietor details, not both");
+    if (b.business?.companyType === "public" && !(b.business.stockExchange && b.business.stockTicker && b.business.brandContactEmail))
+      issue(["business", "stockExchange"], "A public company needs its stock exchange, ticker and a brand contact email");
+  } else {
+    if (b.business?.businessType === "Limited Liability Corporation") issue(["brandType"], "An LLC must register with its EIN.");
+    if (b.business || b.authorizedRep) issue(["business"], "Send either the EIN details or the sole-proprietor details, not both");
+    if (!b.soleProprietor) issue(["soleProprietor"], "Sole-proprietor details are required");
+  }
+});
+var smsOtpRequest = z3.strictObject({ tenantId: smsSetupId, relloAgentId: smsSetupId });
+var smsRegistrationStatus = z3.enum([
+  "details_received",
+  "payment_pending",
+  "submitted",
+  "brand_pending",
+  "brand_approved",
+  "otp_pending",
+  "campaign_pending",
+  "number_pending",
+  "live",
+  "action_needed",
+  "suspended",
+  "rejected",
+  "refunded"
+]);
+var smsRegistrationEnvelope = z3.strictObject({
+  tenantId: smsSetupId,
+  relloAgentId: smsSetupId,
+  brandType: z3.enum(["STANDARD", "SOLE_PROPRIETOR"]),
+  status: smsRegistrationStatus,
+  /** Twilio's code + text, sanitized. */
+  reason: z3.string().max(1e3).nullable(),
+  fieldsToFix: z3.array(z3.string()).nullable(),
+  /** STANDARD: 3 − the BUSINESS's used count (shared by the team); SOLE_PROPRIETOR: null. */
+  remainingFreeUpdates: z3.number().int().min(0).max(3).nullable(),
+  /** Only when `live`. */
+  phoneNumber: z3.string().regex(/^\+1\d{10}$/).nullable(),
+  /** Only for SOLE_PROPRIETOR. Expires 24 h after; a new code is available 60 s after. */
+  otpSentAt: smsSetupTime.nullable(),
+  rev: smsSetupRev,
+  occurredAt: smsSetupTime
+});
+var registrationConflict = z3.strictObject({
+  error: z3.enum(["business_rejected", "business_suspended", "business_suspension_final", "in_review", "no_free_updates", "not_otp_pending"]),
+  envelope: smsRegistrationEnvelope.nullable()
+});
+var setupChargeChangedEvent = z3.strictObject({
+  id: z3.uuid(),
+  type: z3.literal("billing.setup_charge_changed"),
+  tenantId: smsSetupId,
+  occurredAt: smsSetupTime,
+  data: setupChargeEnvelope
+});
+var smsRegistrationChangedEvent = z3.strictObject({
+  id: z3.uuid(),
+  type: z3.literal("sms.registration_changed"),
+  tenantId: smsSetupId,
+  occurredAt: smsSetupTime,
+  data: smsRegistrationEnvelope
+});
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2180,12 +2380,18 @@ export {
   RelloValidationError,
   ServiceClient,
   agentProvisionPayloadSchema,
+  businessIndustry,
+  businessType,
   callerHasPermission,
+  chargeConflict,
   createPlatformKeyValidator,
   createRelloClient,
   createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
+  feeChangedConflict,
+  feeNotFound,
+  feeSlugQuery,
   getHarvestHomeBaseUrl,
   getImplicitApiKeyCount,
   getImplicitApiKeyUses,
@@ -2196,13 +2402,26 @@ export {
   getPropertyEngineHeaders,
   getRelloBaseUrl,
   hasPropertyEngineCredentials,
+  internalError,
   loginlessAgentCreateRequestSchema,
   loginlessAgentRemoveRequestSchema,
+  oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,
   provisionedAgentSchema,
+  quoteVersion,
+  registrationConflict,
   resetImplicitApiKeyUses,
   runRelloPermissionSelfCheck,
+  setupChargeChangedEvent,
+  setupChargeEnvelope,
+  setupChargeRequest,
+  setupChargeStatus,
+  smsOtpRequest,
+  smsRegistrationChangedEvent,
+  smsRegistrationEnvelope,
+  smsRegistrationRequest,
+  smsRegistrationStatus,
   teamMemberCreateRequestSchema,
   teamMemberRemoveRequestSchema,
   teamMemberSignInLinkRequestSchema,
