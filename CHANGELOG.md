@@ -6,6 +6,47 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.36.0 — 2026-11-16
+
+### Added — the G-10R + G-EXTRAS contract: plan switch and add-on quantity (PFP Gateway PKG-2)
+
+Plan a7-1147 §F/§H/§P (AUDIT 106 CLEAR WITH FOLLOW-UPS, KA ruling 1163),
+spec SPEC-PFP-GATEWAY.md G-10R (D47, K-248, H-172), Platform KA prompt 1199.
+One contract for Rello's v1 billing routes and PathfinderPro's callers:
+`src/types/billing-switch.ts`. Version read at 2026-11-16T23:24:48Z: v2.35.0
+tagged (#15), no open PR claims v2.36.0 (#10 takes the next free version when
+it merges, per the rule above).
+
+- Preview: `planSwitchPreviewQuerySchema` (strict; `targetPlanSlug`, optional
+  `interval`) and `PlanSwitchPreviewResponse` with `previewId`, `expiresAt`,
+  `prorationDate`, `requiresConfirmation`, per-subscription lines and
+  `chargeChange`.
+- POST: `planSwitchRequestSchema` (strict: no tenant, no D47 options) with
+  `previewId` and `confirmedChargeChange`. The latter parses as `unknown` on
+  purpose: a non-boolean reaches switchPlan()'s `=== true` check and answers
+  `confirmation_required`, never `invalid_body`. Callers type the body as
+  `PlanSwitchRequest` (`confirmedChargeChange?: true`). Responses: 200 APPLIED,
+  202 OPEN, and the operation GET.
+- `PLAN_SWITCH_ERROR_CODES` (18): `confirmation_required`, `preview_stale`,
+  `preview_consumed`, `use_plan_switch`, `stale_switch`, `switch_in_progress`,
+  `not_armed`, `provider_unreadable`, … ; `PREVIEW_STALE_REASONS`
+  (`inputs_changed` | `provider_changed` | `expired`) and
+  `previewStaleErrorSchema`, whose `reason` is optional and a plain string on
+  the wire, so a later reason never makes an older PFP refuse the answer.
+- `tenantEnablePayloadSchema.addOns`: an optional array of add-on state
+  records (the `cyr` shape), one per feature. Absent = an older Rello; none = [].
+- Add-on quantity PATCH (R1's route, generalized by X1):
+  `addOnQuantityRequestSchema` (strict; `quantity` ≥ 0, `quantityRev` a number
+  or a digit string; the key stays in the `Idempotency-Key` header),
+  `AddOnQuantityResponse` with `status` and `subscriptionCanceled?`, and
+  `ADDON_QUANTITY_ERROR_CODES` (12): the generic six incl.
+  `extra_mlos_exceed_quantity` (`{ activeLoginless, quantity }`) and
+  `members_exceed_quantity` (`{ activeMembers, quantity }`), plus R1's own six.
+  The envelope is R1's: `{ success: false, error: <message>, code, ...extra }`.
+
+Tests: tests/pkg2-plan-switch-addon-quantity.test.mjs, red 8/8 on the v2.35.0
+dist, green after compile; 10 mutants, each killed by a named test.
+
 ## v2.35.0 — 2026-11-16
 
 Rebased onto v2.34.0 (#16, the G-SETUP + G-A2P contract, Platform KA prompt

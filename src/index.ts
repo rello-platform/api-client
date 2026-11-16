@@ -219,6 +219,43 @@ export type {
 } from "./types/index.js";
 
 
+// PFP Gateway G-10R + G-EXTRAS (PKG-2): plan switch and add-on quantity
+export {
+  PLAN_SWITCH_INTERVALS,
+  planSwitchPreviewQuerySchema,
+  planSwitchRequestSchema,
+  PLAN_SWITCH_ERROR_CODES,
+  PREVIEW_STALE_REASONS,
+  previewStaleErrorSchema,
+  addOnQuantityRequestSchema,
+  ADDON_QUANTITY_ERROR_CODES,
+} from "./types/index.js";
+export type {
+  PlanSwitchInterval,
+  PlanSwitchPreviewQuery,
+  PlanSwitchPreviewLine,
+  PlanSwitchPreviewSubscription,
+  PlanSwitchPreviewResponse,
+  PlanSwitchRequestParsed,
+  PlanSwitchRequest,
+  PlanSwitchOperationStatus,
+  PlanSwitchStepState,
+  PlanSwitchStep,
+  PlanSwitchAppliedResponse,
+  PlanSwitchOpenResponse,
+  PlanSwitchResponse,
+  PlanSwitchOperationResponse,
+  PlanSwitchErrorCode,
+  PreviewStaleReason,
+  PreviewStaleError,
+  PlanSwitchError,
+  AddOnQuantityRequest,
+  AddOnQuantityResponse,
+  AddOnQuantityErrorCode,
+  AddOnQuantityErrorBase,
+  AddOnQuantityError,
+} from "./types/index.js";
+
 // PFP Gateway G-SETUP + G-A2P (setup charge, texting registration)
 export {
   quoteVersion,
