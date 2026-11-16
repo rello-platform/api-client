@@ -165,6 +165,7 @@ export {
   teamMemberCreateRequestSchema,
   teamMemberSignInLinkRequestSchema,
   teamMemberRemoveRequestSchema,
+  teamLoginRosterQuerySchema,
   ROSTER_ERROR_CODES,
 } from "./roster.js";
 export type {
@@ -175,11 +176,16 @@ export type {
   TeamMemberCreateRequest,
   TeamMemberCreateResponse,
   TeamMemberSignInLinkRequest,
+  TeamMemberSignInLinkResponse,
   TeamMemberRemoveRequest,
   TeamMemberRemoveResponse,
+  TeamLoginRosterQuery,
+  TeamLoginRosterMember,
+  TeamLoginRosterResponse,
   RosterErrorCode,
   RosterError,
   SignatureQuantityNeeded,
+  AlreadyMember,
   LoginQuantityNeeded,
 } from "./roster.js";
 

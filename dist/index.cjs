@@ -76,6 +76,7 @@ __export(index_exports, {
   smsRegistrationEnvelope: () => smsRegistrationEnvelope,
   smsRegistrationRequest: () => smsRegistrationRequest,
   smsRegistrationStatus: () => smsRegistrationStatus,
+  teamLoginRosterQuerySchema: () => teamLoginRosterQuerySchema,
   teamMemberCreateRequestSchema: () => teamMemberCreateRequestSchema,
   teamMemberRemoveRequestSchema: () => teamMemberRemoveRequestSchema,
   teamMemberSignInLinkRequestSchema: () => teamMemberSignInLinkRequestSchema,
@@ -2208,8 +2209,13 @@ var teamMemberCreateRequestSchema = import_zod2.z.object({
   lastName: rosterNameField("lastName"),
   requestId: rosterRequestIdField
 }).strict();
-var teamMemberSignInLinkRequestSchema = import_zod2.z.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamMemberSignInLinkRequestSchema = import_zod2.z.object({
+  tenantId: rosterIdField("tenantId"),
+  actingRelloUserId: rosterIdField("actingRelloUserId"),
+  requestId: rosterRequestIdField
+}).strict();
 var teamMemberRemoveRequestSchema = import_zod2.z.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamLoginRosterQuerySchema = import_zod2.z.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
 var ROSTER_ERROR_CODES = [
   "invalid_body",
   // 400
@@ -2231,6 +2237,8 @@ var ROSTER_ERROR_CODES = [
   // 404
   "member_not_found",
   // 404
+  "cannot_remove_owner",
+  // 409: an owner's login (yours included) is not removed through the roster (v2.35.0)
   "signature_quantity_needed",
   // 409: buy one more extra signature first
   "login_quantity_needed",
@@ -2512,6 +2520,7 @@ function createServiceClient(config) {
   smsRegistrationEnvelope,
   smsRegistrationRequest,
   smsRegistrationStatus,
+  teamLoginRosterQuerySchema,
   teamMemberCreateRequestSchema,
   teamMemberRemoveRequestSchema,
   teamMemberSignInLinkRequestSchema,

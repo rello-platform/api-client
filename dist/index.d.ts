@@ -2639,6 +2639,7 @@ declare function parseAgentPayload(body: unknown): {
  *   POST /api/provisioning/loginless-agent                       (X2a)
  *   POST /api/provisioning/loginless-agent/[agentId]/remove      (X2a)
  *   POST /api/provisioning/team-member                           (X2b)
+ *   GET  /api/provisioning/team-member?tenantId=&actingRelloUserId= (X2b, v2.35.0)
  *   POST /api/provisioning/team-member/[userId]/sign-in-link     (X2b)
  *   POST /api/provisioning/team-member/[userId]/remove           (X2b)
  */
@@ -2687,11 +2688,24 @@ interface TeamMemberCreateResponse {
     signInEmail: "queued";
     replayed: boolean;
 }
+/**
+ * v2.35.0: `requestId` is required. A resend is one owner action and one email: the
+ * caller mints a requestId per click and keeps it until it gets an answer, so a
+ * retry after a lost answer replays (200, `replayed: true`) and never sends a
+ * second email. (v2.33.0 had no requestId; nothing called the route yet.)
+ */
 declare const teamMemberSignInLinkRequestSchema: z.ZodObject<{
     tenantId: z.ZodString;
     actingRelloUserId: z.ZodString;
+    requestId: z.ZodString;
 }, z.core.$strict>;
 type TeamMemberSignInLinkRequest = z.infer<typeof teamMemberSignInLinkRequestSchema>;
+/** 202 when queued; 200 with `replayed: true` for the same requestId. */
+interface TeamMemberSignInLinkResponse {
+    userId: string;
+    signInEmail: "queued";
+    replayed: boolean;
+}
 declare const teamMemberRemoveRequestSchema: z.ZodObject<{
     tenantId: z.ZodString;
     actingRelloUserId: z.ZodString;
@@ -2702,7 +2716,44 @@ interface TeamMemberRemoveResponse {
     isActive: false;
     alreadyInactive: boolean;
 }
-declare const ROSTER_ERROR_CODES: readonly ["invalid_body", "unauthorized", "key_not_scoped", "missing_permission", "unknown_app", "tenant_mismatch", "app_not_enabled", "actor_not_owner", "agent_not_found", "member_not_found", "signature_quantity_needed", "login_quantity_needed", "email_in_use", "already_member", "email_registered_elsewhere", "idempotency_key_reused", "internal_error"];
+/** The query string of `GET /api/provisioning/team-member`. */
+declare const teamLoginRosterQuerySchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    actingRelloUserId: z.ZodString;
+}, z.core.$strict>;
+type TeamLoginRosterQuery = z.infer<typeof teamLoginRosterQuerySchema>;
+/** One person with an active login in the account. */
+interface TeamLoginRosterMember {
+    userId: string;
+    /** The person's Rello Agent, or null when the login has none. */
+    relloAgentId: string | null;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    /** An owner role (MLO_OWNER, BROKER_OWNER, AGENT_OWNER): cannot be removed here. */
+    isOwner: boolean;
+}
+/**
+ * 200. Derived at read time; nothing is stored.
+ * - `included`: the plan's logins (`Plan.maxUsers`); null = the plan sets no limit.
+ * - `purchased`: the live `pfp-extra-team-login` quantity (0 with none).
+ * - `capacity`: included + purchased; null when included is null.
+ * - `members`: active logins now.
+ * - `overBy`: members − capacity when positive, else 0. An out-of-band quantity drop
+ *   (a Stripe-side or admin edit) can leave an account over; everyone keeps working,
+ *   nobody is removed, and the owner adds a login or removes someone.
+ */
+interface TeamLoginRosterResponse {
+    included: number | null;
+    purchased: number;
+    capacity: number | null;
+    members: number;
+    overBy: number;
+    addOnCatalogKey: "pfp-extra-team-login";
+    people: TeamLoginRosterMember[];
+}
+declare const ROSTER_ERROR_CODES: readonly ["invalid_body", "unauthorized", "key_not_scoped", "missing_permission", "unknown_app", "tenant_mismatch", "app_not_enabled", "actor_not_owner", "agent_not_found", "member_not_found", "cannot_remove_owner", "signature_quantity_needed", "login_quantity_needed", "email_in_use", "already_member", "email_registered_elsewhere", "idempotency_key_reused", "internal_error"];
 type RosterErrorCode = (typeof ROSTER_ERROR_CODES)[number];
 /** Every non-2xx body. `error` is for a person; `code` is for the caller. */
 interface RosterError {
@@ -2715,6 +2766,12 @@ interface SignatureQuantityNeeded extends RosterError {
     purchased: number;
     extras: number;
     addOnCatalogKey: "pfp-extra-signature";
+}
+/** 409 already_member: the email already has a login in this account (`isActive` false = removed earlier). */
+interface AlreadyMember extends RosterError {
+    code: "already_member";
+    userId: string;
+    isActive: boolean;
 }
 /** 409 login_quantity_needed: the fix is one more `pfp-extra-team-login`. */
 interface LoginQuantityNeeded extends RosterError {
@@ -3358,4 +3415,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };
+export { type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PROPERTY_AUTOFILL_FIELD_KEYS, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, agentProvisionPayloadSchema, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, teamLoginRosterQuerySchema, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };

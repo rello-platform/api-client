@@ -6,6 +6,30 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.35.0 — 2026-11-16
+
+Rebased onto v2.34.0 (#16, the G-SETUP + G-A2P contract, Platform KA prompt
+1197). It contains every earlier release, and #16's exports and types are unchanged.
+
+### Added / changed — the X2b team-member contract (PFP Gateway X2b, D33)
+
+Platform KA prompt 1171 (plan a4-1151 ruled: "keep everyone working, derive
+'over by N' on read, one AdminNotification, never auto-deactivate or delete").
+
+- `teamMemberSignInLinkRequestSchema` now requires `requestId` (8–200 chars).
+  A resend is one owner click and one email: a retry after a lost answer
+  replays with the same requestId and sends nothing more. BREAKING against
+  v2.33.0's shape, which nothing called yet (PathfinderPro's caller is not built).
+- `TeamMemberSignInLinkResponse` `{ userId, signInEmail: "queued", replayed }`.
+- `GET /api/provisioning/team-member` — the logins read:
+  `teamLoginRosterQuerySchema` `{ tenantId, actingRelloUserId }` (strict), and
+  `TeamLoginRosterResponse` `{ included, purchased, capacity, members, overBy,
+  addOnCatalogKey: "pfp-extra-team-login", people }` with
+  `TeamLoginRosterMember` rows. Everything is derived when read; nothing is stored.
+- `ROSTER_ERROR_CODES` gains `cannot_remove_owner` (409): an owner's login is not
+  removed through the roster route.
+- `AlreadyMember` `{ code: "already_member", userId, isActive }`.
+
 ## v2.34.0 — 2026-11-16
 
 ### Added — the G-SETUP + G-A2P contract: setup charge and texting registration (PFP Gateway)

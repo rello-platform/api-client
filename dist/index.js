@@ -2119,8 +2119,13 @@ var teamMemberCreateRequestSchema = z2.object({
   lastName: rosterNameField("lastName"),
   requestId: rosterRequestIdField
 }).strict();
-var teamMemberSignInLinkRequestSchema = z2.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamMemberSignInLinkRequestSchema = z2.object({
+  tenantId: rosterIdField("tenantId"),
+  actingRelloUserId: rosterIdField("actingRelloUserId"),
+  requestId: rosterRequestIdField
+}).strict();
 var teamMemberRemoveRequestSchema = z2.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamLoginRosterQuerySchema = z2.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
 var ROSTER_ERROR_CODES = [
   "invalid_body",
   // 400
@@ -2142,6 +2147,8 @@ var ROSTER_ERROR_CODES = [
   // 404
   "member_not_found",
   // 404
+  "cannot_remove_owner",
+  // 409: an owner's login (yours included) is not removed through the roster (v2.35.0)
   "signature_quantity_needed",
   // 409: buy one more extra signature first
   "login_quantity_needed",
@@ -2422,6 +2429,7 @@ export {
   smsRegistrationEnvelope,
   smsRegistrationRequest,
   smsRegistrationStatus,
+  teamLoginRosterQuerySchema,
   teamMemberCreateRequestSchema,
   teamMemberRemoveRequestSchema,
   teamMemberSignInLinkRequestSchema,

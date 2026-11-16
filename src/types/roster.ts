@@ -12,6 +12,7 @@
  *   POST /api/provisioning/loginless-agent                       (X2a)
  *   POST /api/provisioning/loginless-agent/[agentId]/remove      (X2a)
  *   POST /api/provisioning/team-member                           (X2b)
+ *   GET  /api/provisioning/team-member?tenantId=&actingRelloUserId= (X2b, v2.35.0)
  *   POST /api/provisioning/team-member/[userId]/sign-in-link     (X2b)
  *   POST /api/provisioning/team-member/[userId]/remove           (X2b)
  */
@@ -91,10 +92,27 @@ export interface TeamMemberCreateResponse {
   replayed: boolean;
 }
 
+/**
+ * v2.35.0: `requestId` is required. A resend is one owner action and one email: the
+ * caller mints a requestId per click and keeps it until it gets an answer, so a
+ * retry after a lost answer replays (200, `replayed: true`) and never sends a
+ * second email. (v2.33.0 had no requestId; nothing called the route yet.)
+ */
 export const teamMemberSignInLinkRequestSchema = z
-  .object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") })
+  .object({
+    tenantId: rosterIdField("tenantId"),
+    actingRelloUserId: rosterIdField("actingRelloUserId"),
+    requestId: rosterRequestIdField,
+  })
   .strict();
 export type TeamMemberSignInLinkRequest = z.infer<typeof teamMemberSignInLinkRequestSchema>;
+
+/** 202 when queued; 200 with `replayed: true` for the same requestId. */
+export interface TeamMemberSignInLinkResponse {
+  userId: string;
+  signInEmail: "queued";
+  replayed: boolean;
+}
 
 export const teamMemberRemoveRequestSchema = z
   .object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") })
@@ -105,6 +123,47 @@ export interface TeamMemberRemoveResponse {
   userId: string;
   isActive: false;
   alreadyInactive: boolean;
+}
+
+// ─── Team logins read (D33: who has a login, and what the account pays for) ──
+
+/** The query string of `GET /api/provisioning/team-member`. */
+export const teamLoginRosterQuerySchema = z
+  .object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") })
+  .strict();
+export type TeamLoginRosterQuery = z.infer<typeof teamLoginRosterQuerySchema>;
+
+/** One person with an active login in the account. */
+export interface TeamLoginRosterMember {
+  userId: string;
+  /** The person's Rello Agent, or null when the login has none. */
+  relloAgentId: string | null;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  /** An owner role (MLO_OWNER, BROKER_OWNER, AGENT_OWNER): cannot be removed here. */
+  isOwner: boolean;
+}
+
+/**
+ * 200. Derived at read time; nothing is stored.
+ * - `included`: the plan's logins (`Plan.maxUsers`); null = the plan sets no limit.
+ * - `purchased`: the live `pfp-extra-team-login` quantity (0 with none).
+ * - `capacity`: included + purchased; null when included is null.
+ * - `members`: active logins now.
+ * - `overBy`: members − capacity when positive, else 0. An out-of-band quantity drop
+ *   (a Stripe-side or admin edit) can leave an account over; everyone keeps working,
+ *   nobody is removed, and the owner adds a login or removes someone.
+ */
+export interface TeamLoginRosterResponse {
+  included: number | null;
+  purchased: number;
+  capacity: number | null;
+  members: number;
+  overBy: number;
+  addOnCatalogKey: "pfp-extra-team-login";
+  people: TeamLoginRosterMember[];
 }
 
 // ─── Refusals ────────────────────────────────────────────────────────────────
@@ -120,6 +179,7 @@ export const ROSTER_ERROR_CODES = [
   "actor_not_owner", // 403: actingRelloUserId is not an active owner of the tenant
   "agent_not_found", // 404
   "member_not_found", // 404
+  "cannot_remove_owner", // 409: an owner's login (yours included) is not removed through the roster (v2.35.0)
   "signature_quantity_needed", // 409: buy one more extra signature first
   "login_quantity_needed", // 409: buy one more extra login first
   "email_in_use", // 409: an agent of this tenant already has the email
@@ -142,6 +202,13 @@ export interface SignatureQuantityNeeded extends RosterError {
   purchased: number;
   extras: number;
   addOnCatalogKey: "pfp-extra-signature";
+}
+
+/** 409 already_member: the email already has a login in this account (`isActive` false = removed earlier). */
+export interface AlreadyMember extends RosterError {
+  code: "already_member";
+  userId: string;
+  isActive: boolean;
 }
 
 /** 409 login_quantity_needed: the fix is one more `pfp-extra-team-login`. */
