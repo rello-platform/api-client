@@ -229,6 +229,16 @@ export {
   previewStaleErrorSchema,
   addOnQuantityRequestSchema,
   ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
+  addOnQuantityResponseSchema,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  extraMlosExceedQuantityErrorSchema,
+  membersExceedQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema,
+  addOnQuantityErrorSchema,
+  isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError,
 } from "./types/index.js";
 export type {
   PlanSwitchInterval,
@@ -252,8 +262,11 @@ export type {
   AddOnQuantityRequest,
   AddOnQuantityResponse,
   AddOnQuantityErrorCode,
-  AddOnQuantityErrorBase,
   AddOnQuantityError,
+  AddOnQuantityIdempotencyErrorCode,
+  ExtraMlosExceedQuantityError,
+  MembersExceedQuantityError,
+  AddOnQuantityOtherError,
 } from "./types/index.js";
 
 // PFP Gateway G-SETUP + G-A2P (setup charge, texting registration)

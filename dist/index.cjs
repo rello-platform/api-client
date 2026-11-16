@@ -21,6 +21,9 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   ADDON_QUANTITY_ERROR_CODES: () => ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES: () => ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER: () => ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: () => ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource: () => AdminResource,
   AuthResource: () => AuthResource,
   PLAN_SWITCH_ERROR_CODES: () => PLAN_SWITCH_ERROR_CODES,
@@ -37,7 +40,10 @@ __export(index_exports, {
   RelloUnavailableError: () => RelloUnavailableError,
   RelloValidationError: () => RelloValidationError,
   ServiceClient: () => ServiceClient,
+  addOnQuantityErrorSchema: () => addOnQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema: () => addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema: () => addOnQuantityRequestSchema,
+  addOnQuantityResponseSchema: () => addOnQuantityResponseSchema,
   agentProvisionPayloadSchema: () => agentProvisionPayloadSchema,
   businessIndustry: () => businessIndustry,
   businessType: () => businessType,
@@ -48,6 +54,7 @@ __export(index_exports, {
   createRelloPermissionSelfCheck: () => createRelloPermissionSelfCheck,
   createServiceBearerGuard: () => createServiceBearerGuard,
   createServiceClient: () => createServiceClient,
+  extraMlosExceedQuantityErrorSchema: () => extraMlosExceedQuantityErrorSchema,
   feeChangedConflict: () => feeChangedConflict,
   feeNotFound: () => feeNotFound,
   feeSlugQuery: () => feeSlugQuery,
@@ -62,8 +69,11 @@ __export(index_exports, {
   getRelloBaseUrl: () => getRelloBaseUrl,
   hasPropertyEngineCredentials: () => hasPropertyEngineCredentials,
   internalError: () => internalError,
+  isExtraMlosExceedQuantityError: () => isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError: () => isMembersExceedQuantityError,
   loginlessAgentCreateRequestSchema: () => loginlessAgentCreateRequestSchema,
   loginlessAgentRemoveRequestSchema: () => loginlessAgentRemoveRequestSchema,
+  membersExceedQuantityErrorSchema: () => membersExceedQuantityErrorSchema,
   oneTimeFeeQuote: () => oneTimeFeeQuote,
   parseAgentPayload: () => parseAgentPayload,
   parseTenantPayload: () => parseTenantPayload,
@@ -2508,10 +2518,27 @@ var previewStaleErrorSchema = import_zod4.z.object({
   error: import_zod4.z.literal("preview_stale"),
   reason: import_zod4.z.string().optional()
 });
+var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
 var addOnQuantityRequestSchema = import_zod4.z.object({
   quantity: import_zod4.z.number().int().nonnegative(),
   quantityRev: import_zod4.z.union([import_zod4.z.number().int().nonnegative(), import_zod4.z.string().regex(/^\d{1,18}$/)])
 }).strict();
+var addOnQuantityResponseSchema = import_zod4.z.object({
+  tenantAddOnId: import_zod4.z.string(),
+  /** The quantity this revision asked for. */
+  quantity: import_zod4.z.number().int().nonnegative(),
+  /** The revision, as a decimal string. */
+  quantityRev: import_zod4.z.string(),
+  /** What Stripe bills now. */
+  billedQuantity: import_zod4.z.number().int().nonnegative(),
+  /** A newer revision already superseded this one; Stripe converges on the newest. */
+  superseded: import_zod4.z.boolean(),
+  /** X1: the TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). Absent from R1. */
+  status: import_zod4.z.string().optional(),
+  /** X1: true when quantity 0 ended the add-on's own subscription. Absent from R1. */
+  subscriptionCanceled: import_zod4.z.boolean().optional()
+});
 var ADDON_QUANTITY_ERROR_CODES = [
   "members_exceed_quantity",
   "extra_mlos_exceed_quantity",
@@ -2526,6 +2553,42 @@ var ADDON_QUANTITY_ERROR_CODES = [
   "payment_method_required",
   "stripe_failed"
 ];
+var ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES = [
+  "IDEMPOTENCY_KEY_REQUIRED",
+  "IDEMPOTENCY_KEY_INVALID",
+  "IDEMPOTENCY_KEY_CONFLICT"
+];
+var extraMlosExceedQuantityErrorSchema = import_zod4.z.object({
+  success: import_zod4.z.literal(false),
+  error: import_zod4.z.string(),
+  code: import_zod4.z.literal("extra_mlos_exceed_quantity"),
+  activeLoginless: import_zod4.z.number().int().nonnegative(),
+  quantity: import_zod4.z.number().int().nonnegative()
+});
+var membersExceedQuantityErrorSchema = import_zod4.z.object({
+  success: import_zod4.z.literal(false),
+  error: import_zod4.z.string(),
+  code: import_zod4.z.literal("members_exceed_quantity"),
+  activeMembers: import_zod4.z.number().int().nonnegative(),
+  quantity: import_zod4.z.number().int().nonnegative()
+});
+var addOnQuantityOtherErrorSchema = import_zod4.z.object({
+  success: import_zod4.z.literal(false).optional(),
+  /** Human-readable. */
+  error: import_zod4.z.string(),
+  code: import_zod4.z.string().optional()
+}).loose();
+var addOnQuantityErrorSchema = import_zod4.z.union([
+  extraMlosExceedQuantityErrorSchema,
+  membersExceedQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema
+]);
+function isExtraMlosExceedQuantityError(e) {
+  return extraMlosExceedQuantityErrorSchema.safeParse(e).success;
+}
+function isMembersExceedQuantityError(e) {
+  return membersExceedQuantityErrorSchema.safeParse(e).success;
+}
 
 // src/index.ts
 function createRelloClient(config) {
@@ -2537,6 +2600,9 @@ function createServiceClient(config) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource,
   AuthResource,
   PLAN_SWITCH_ERROR_CODES,
@@ -2553,7 +2619,10 @@ function createServiceClient(config) {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  addOnQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,
+  addOnQuantityResponseSchema,
   agentProvisionPayloadSchema,
   businessIndustry,
   businessType,
@@ -2564,6 +2633,7 @@ function createServiceClient(config) {
   createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
+  extraMlosExceedQuantityErrorSchema,
   feeChangedConflict,
   feeNotFound,
   feeSlugQuery,
@@ -2578,8 +2648,11 @@ function createServiceClient(config) {
   getRelloBaseUrl,
   hasPropertyEngineCredentials,
   internalError,
+  isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError,
   loginlessAgentCreateRequestSchema,
   loginlessAgentRemoveRequestSchema,
+  membersExceedQuantityErrorSchema,
   oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,

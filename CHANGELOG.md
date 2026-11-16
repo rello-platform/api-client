@@ -35,17 +35,33 @@ it merges, per the rule above).
   the wire, so a later reason never makes an older PFP refuse the answer.
 - `tenantEnablePayloadSchema.addOns`: an optional array of add-on state
   records (the `cyr` shape), one per feature. Absent = an older Rello; none = [].
-- Add-on quantity PATCH (R1's route, generalized by X1):
-  `addOnQuantityRequestSchema` (strict; `quantity` ≥ 0, `quantityRev` a number
-  or a digit string; the key stays in the `Idempotency-Key` header),
-  `AddOnQuantityResponse` with `status` and `subscriptionCanceled?`, and
-  `ADDON_QUANTITY_ERROR_CODES` (12): the generic six incl.
-  `extra_mlos_exceed_quantity` (`{ activeLoginless, quantity }`) and
-  `members_exceed_quantity` (`{ activeMembers, quantity }`), plus R1's own six.
+- Add-on quantity PATCH (R1's route, generalized by X1), typed exactly as R1
+  serves it (#2381 @ 8afad20dc5; fix round 1202, AUDIT 106 GD-1971..1973):
+  - `addOnQuantityRequestSchema` (strict; `quantity` ≥ 0, `quantityRev` a
+    non-negative number or a digit string). The key travels in the
+    `X-Idempotency-Key` header, 8–128 characters
+    (`ADDON_QUANTITY_IDEMPOTENCY_HEADER`, `ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH`).
+  - `addOnQuantityResponseSchema` / `AddOnQuantityResponse`: R1's five fields
+    (`tenantAddOnId`, `quantity`, `quantityRev` as a string, `billedQuantity`,
+    `superseded`); `status` and `subscriptionCanceled` are optional, added by X1.
+  - `ADDON_QUANTITY_ERROR_CODES` (12 domain codes) and
+    `ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES` (`IDEMPOTENCY_KEY_REQUIRED`,
+    `_INVALID`, `_CONFLICT`).
+  - `addOnQuantityErrorSchema` / `AddOnQuantityError` parse every refusal the
+    route gives, including the codeless ones (`{ success: false, error }` for
+    400 invalid body, 404, 403, 500, 503; `{ error }` from the auth and
+    tenant-app guards) and an unknown later code; extra fields are kept. The
+    exact domain branches: `extraMlosExceedQuantityErrorSchema`
+    (`{ activeLoginless, quantity }`) and `membersExceedQuantityErrorSchema`
+    (`{ activeMembers, quantity }`), narrowed with
+    `isExtraMlosExceedQuantityError` / `isMembersExceedQuantityError`.
   The envelope is R1's: `{ success: false, error: <message>, code, ...extra }`.
 
 Tests: tests/pkg2-plan-switch-addon-quantity.test.mjs, red 8/8 on the v2.35.0
 dist, green after compile; 10 mutants, each killed by a named test.
+Fix round (prompt 1202): tests/pkg2-addon-quantity-wire-1202.test.mjs and
+tests/types/pkg2-addon-quantity-wire.fixture.ts, red 6/6 at ddc94cde2, green
+after; 4 mutants (one or two per finding), each killed.
 
 ## v2.35.0 — 2026-11-16
 

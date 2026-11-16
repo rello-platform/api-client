@@ -3394,7 +3394,7 @@ type SmsRegistrationChangedEvent = z.infer<typeof smsRegistrationChangedEvent>;
  *   GET   /api/v1/billing/plan-switch/preview?targetPlanSlug=&interval=   (G-10R-2)
  *   POST  /api/v1/billing/plan-switch                                     (G-10R-2)
  *   GET   /api/v1/billing/plan-switch/[operationId]                       (G-10R-2)
- *   PATCH /api/v1/billing/add-on/[addOnId]  + `Idempotency-Key` header    (R1, generalized by X1)
+ *   PATCH /api/v1/billing/add-on/[addOnId]  + `X-Idempotency-Key` header  (R1, generalized by X1)
  */
 
 declare const PLAN_SWITCH_INTERVALS: readonly ["month", "year"];
@@ -3560,40 +3560,49 @@ type PlanSwitchError = PreviewStaleError | {
     message?: string;
 };
 /**
+ * The idempotency key travels in this header, 8–128 characters (R1's
+ * `src/lib/billing/v1/idempotency-header.ts`). A missing or malformed one is
+ * refused before anything else (`IDEMPOTENCY_KEY_REQUIRED` / `_INVALID`).
+ */
+declare const ADDON_QUANTITY_IDEMPOTENCY_HEADER: "X-Idempotency-Key";
+declare const ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: Readonly<{
+    readonly min: 8;
+    readonly max: 128;
+}>;
+/**
  * Body of `PATCH /api/v1/billing/add-on/[addOnId]`. `quantity` is absolute
  * (0 removes the item); `quantityRev` is the caller's monotonic revision, a
- * number or, past 2^53, a digit string. The idempotency key travels in the
- * `Idempotency-Key` header, as on R1's route. Strict: the tenant comes from auth.
+ * non-negative number or, past 2^53, a digit string. The key travels in the
+ * {@link ADDON_QUANTITY_IDEMPOTENCY_HEADER} header. Strict: the tenant comes from auth.
  */
 declare const addOnQuantityRequestSchema: z.ZodObject<{
     quantity: z.ZodNumber;
     quantityRev: z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>;
 }, z.core.$strict>;
 type AddOnQuantityRequest = z.infer<typeof addOnQuantityRequestSchema>;
-/** 200 `{ success: true, data }`. */
-interface AddOnQuantityResponse {
-    tenantAddOnId: string;
-    /** The quantity this revision asked for. */
-    quantity: number;
-    /** The revision, as a decimal string. */
-    quantityRev: string;
-    /** What Stripe bills now. */
-    billedQuantity: number;
-    /** A newer revision already superseded this one; Stripe converges on the newest. */
-    superseded: boolean;
-    /** The TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). */
-    status: string;
-    /** true when quantity 0 ended the add-on's own subscription. */
-    subscriptionCanceled?: boolean;
-}
 /**
- * Every `code` the quantity PATCH answers (envelope: `{ success: false, error:
- * <message>, code, ...extra }`). Each refuses a billing action; none is a send gate.
+ * 200 `{ success: true, data }`. R1 (#2361/#2381) sends the first five fields.
+ * `status` and `subscriptionCanceled` are added by X1 (the generic PATCH); a
+ * reader must treat them as absent on an R1 answer.
+ */
+declare const addOnQuantityResponseSchema: z.ZodObject<{
+    tenantAddOnId: z.ZodString;
+    quantity: z.ZodNumber;
+    quantityRev: z.ZodString;
+    billedQuantity: z.ZodNumber;
+    superseded: z.ZodBoolean;
+    status: z.ZodOptional<z.ZodString>;
+    subscriptionCanceled: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>;
+type AddOnQuantityResponse = z.infer<typeof addOnQuantityResponseSchema>;
+/**
+ * The domain `code`s the quantity PATCH answers. Each refuses a billing action;
+ * none is a send gate.
  *
  *  409 members_exceed_quantity    pfp-extra-team-login below the active login members
- *                                  (extra `{ activeMembers, quantity }`); 0 Stripe calls
+ *                                  (`{ activeMembers, quantity }`); 0 Stripe calls (X1)
  *  409 extra_mlos_exceed_quantity pfp-extra-signature below the active loginless MLOs
- *                                  (extra `{ activeLoginless, quantity }`); 0 Stripe calls
+ *                                  (`{ activeLoginless, quantity }`); 0 Stripe calls (X1)
  *  409 stale_quantity_rev · 400 contact_sales (above the add-on's maxQuantity) ·
  *  400 included_in_plan (Refi Radar on Pro/Team) · addon_price_not_configured
  *  R1's own: 404 addon_not_found · 409 addon_not_active · 409 addon_state_unknown ·
@@ -3601,23 +3610,62 @@ interface AddOnQuantityResponse {
  */
 declare const ADDON_QUANTITY_ERROR_CODES: readonly ["members_exceed_quantity", "extra_mlos_exceed_quantity", "stale_quantity_rev", "contact_sales", "included_in_plan", "addon_price_not_configured", "addon_not_found", "addon_not_active", "addon_state_unknown", "quantity_not_supported", "payment_method_required", "stripe_failed"];
 type AddOnQuantityErrorCode = (typeof ADDON_QUANTITY_ERROR_CODES)[number];
-interface AddOnQuantityErrorBase {
-    success: false;
-    /** Human-readable. */
-    error: string;
-    code: AddOnQuantityErrorCode;
-}
-type AddOnQuantityError = (AddOnQuantityErrorBase & {
-    code: "extra_mlos_exceed_quantity";
-    activeLoginless: number;
-    quantity: number;
-}) | (AddOnQuantityErrorBase & {
-    code: "members_exceed_quantity";
-    activeMembers: number;
-    quantity: number;
-}) | (AddOnQuantityErrorBase & {
-    code: Exclude<AddOnQuantityErrorCode, "extra_mlos_exceed_quantity" | "members_exceed_quantity">;
-});
+/** The idempotency refusals every v1 billing mutation shares (uppercase, as R1 sends them): 400, 400, 422. */
+declare const ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES: readonly ["IDEMPOTENCY_KEY_REQUIRED", "IDEMPOTENCY_KEY_INVALID", "IDEMPOTENCY_KEY_CONFLICT"];
+type AddOnQuantityIdempotencyErrorCode = (typeof ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES)[number];
+/** 409 extra_mlos_exceed_quantity, exactly. */
+declare const extraMlosExceedQuantityErrorSchema: z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"extra_mlos_exceed_quantity">;
+    activeLoginless: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>;
+type ExtraMlosExceedQuantityError = z.infer<typeof extraMlosExceedQuantityErrorSchema>;
+/** 409 members_exceed_quantity, exactly. */
+declare const membersExceedQuantityErrorSchema: z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"members_exceed_quantity">;
+    activeMembers: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>;
+type MembersExceedQuantityError = z.infer<typeof membersExceedQuantityErrorSchema>;
+/**
+ * Any other refusal the route gives. Not every answer carries a `code` or even
+ * `success`: R1's 400 invalid body, 404 add-on not found, 403 other app's
+ * add-on, 500 and 503 send `{ success: false, error }`; requireV1Auth's 401/403
+ * and the tenant-app guard send `{ error }`. A code is one of
+ * {@link ADDON_QUANTITY_ERROR_CODES}, {@link ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES},
+ * or one a later Rello adds; extra fields (e.g. `convergence`) are kept.
+ */
+declare const addOnQuantityOtherErrorSchema: z.ZodObject<{
+    success: z.ZodOptional<z.ZodLiteral<false>>;
+    error: z.ZodString;
+    code: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>;
+type AddOnQuantityOtherError = z.infer<typeof addOnQuantityOtherErrorSchema>;
+/** Every refusal of the quantity PATCH. Narrow the exact domain branches with the guards below. */
+declare const addOnQuantityErrorSchema: z.ZodUnion<readonly [z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"extra_mlos_exceed_quantity">;
+    activeLoginless: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>, z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"members_exceed_quantity">;
+    activeMembers: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>, z.ZodObject<{
+    success: z.ZodOptional<z.ZodLiteral<false>>;
+    error: z.ZodString;
+    code: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>]>;
+type AddOnQuantityError = ExtraMlosExceedQuantityError | MembersExceedQuantityError | AddOnQuantityOtherError;
+declare function isExtraMlosExceedQuantityError(e: unknown): e is ExtraMlosExceedQuantityError;
+declare function isMembersExceedQuantityError(e: unknown): e is MembersExceedQuantityError;
 
 /**
  * implicit-apikey-telemetry — make the implicit-RELLO_API_KEY fallback COUNTABLE.
@@ -3693,4 +3741,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { ADDON_QUANTITY_ERROR_CODES, type AddOnQuantityError, type AddOnQuantityErrorBase, type AddOnQuantityErrorCode, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanSwitchAppliedResponse, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnQuantityRequestSchema, agentProvisionPayloadSchema, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planSwitchPreviewQuerySchema, planSwitchRequestSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, teamLoginRosterQuerySchema, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };
+export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanSwitchAppliedResponse, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, agentProvisionPayloadSchema, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, membersExceedQuantityErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planSwitchPreviewQuerySchema, planSwitchRequestSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, teamLoginRosterQuerySchema, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };

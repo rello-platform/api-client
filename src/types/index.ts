@@ -242,6 +242,16 @@ export {
   previewStaleErrorSchema,
   addOnQuantityRequestSchema,
   ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
+  addOnQuantityResponseSchema,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  extraMlosExceedQuantityErrorSchema,
+  membersExceedQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema,
+  addOnQuantityErrorSchema,
+  isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError,
 } from "./billing-switch.js";
 export type {
   PlanSwitchInterval,
@@ -265,6 +275,9 @@ export type {
   AddOnQuantityRequest,
   AddOnQuantityResponse,
   AddOnQuantityErrorCode,
-  AddOnQuantityErrorBase,
   AddOnQuantityError,
+  AddOnQuantityIdempotencyErrorCode,
+  ExtraMlosExceedQuantityError,
+  MembersExceedQuantityError,
+  AddOnQuantityOtherError,
 } from "./billing-switch.js";

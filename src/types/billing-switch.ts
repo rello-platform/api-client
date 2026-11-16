@@ -11,7 +11,7 @@
  *   GET   /api/v1/billing/plan-switch/preview?targetPlanSlug=&interval=   (G-10R-2)
  *   POST  /api/v1/billing/plan-switch                                     (G-10R-2)
  *   GET   /api/v1/billing/plan-switch/[operationId]                       (G-10R-2)
- *   PATCH /api/v1/billing/add-on/[addOnId]  + `Idempotency-Key` header    (R1, generalized by X1)
+ *   PATCH /api/v1/billing/add-on/[addOnId]  + `X-Idempotency-Key` header  (R1, generalized by X1)
  */
 import { z } from "zod";
 
@@ -209,10 +209,18 @@ export type PlanSwitchError =
 // ─── Add-on quantity (R1's PATCH, generalized by X1) ────────────────────────
 
 /**
+ * The idempotency key travels in this header, 8–128 characters (R1's
+ * `src/lib/billing/v1/idempotency-header.ts`). A missing or malformed one is
+ * refused before anything else (`IDEMPOTENCY_KEY_REQUIRED` / `_INVALID`).
+ */
+export const ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key" as const;
+export const ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 } as const);
+
+/**
  * Body of `PATCH /api/v1/billing/add-on/[addOnId]`. `quantity` is absolute
  * (0 removes the item); `quantityRev` is the caller's monotonic revision, a
- * number or, past 2^53, a digit string. The idempotency key travels in the
- * `Idempotency-Key` header, as on R1's route. Strict: the tenant comes from auth.
+ * non-negative number or, past 2^53, a digit string. The key travels in the
+ * {@link ADDON_QUANTITY_IDEMPOTENCY_HEADER} header. Strict: the tenant comes from auth.
  */
 export const addOnQuantityRequestSchema = z
   .object({
@@ -222,31 +230,36 @@ export const addOnQuantityRequestSchema = z
   .strict();
 export type AddOnQuantityRequest = z.infer<typeof addOnQuantityRequestSchema>;
 
-/** 200 `{ success: true, data }`. */
-export interface AddOnQuantityResponse {
-  tenantAddOnId: string;
+/**
+ * 200 `{ success: true, data }`. R1 (#2361/#2381) sends the first five fields.
+ * `status` and `subscriptionCanceled` are added by X1 (the generic PATCH); a
+ * reader must treat them as absent on an R1 answer.
+ */
+export const addOnQuantityResponseSchema = z.object({
+  tenantAddOnId: z.string(),
   /** The quantity this revision asked for. */
-  quantity: number;
+  quantity: z.number().int().nonnegative(),
   /** The revision, as a decimal string. */
-  quantityRev: string;
+  quantityRev: z.string(),
   /** What Stripe bills now. */
-  billedQuantity: number;
+  billedQuantity: z.number().int().nonnegative(),
   /** A newer revision already superseded this one; Stripe converges on the newest. */
-  superseded: boolean;
-  /** The TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). */
-  status: string;
-  /** true when quantity 0 ended the add-on's own subscription. */
-  subscriptionCanceled?: boolean;
-}
+  superseded: z.boolean(),
+  /** X1: the TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). Absent from R1. */
+  status: z.string().optional(),
+  /** X1: true when quantity 0 ended the add-on's own subscription. Absent from R1. */
+  subscriptionCanceled: z.boolean().optional(),
+});
+export type AddOnQuantityResponse = z.infer<typeof addOnQuantityResponseSchema>;
 
 /**
- * Every `code` the quantity PATCH answers (envelope: `{ success: false, error:
- * <message>, code, ...extra }`). Each refuses a billing action; none is a send gate.
+ * The domain `code`s the quantity PATCH answers. Each refuses a billing action;
+ * none is a send gate.
  *
  *  409 members_exceed_quantity    pfp-extra-team-login below the active login members
- *                                  (extra `{ activeMembers, quantity }`); 0 Stripe calls
+ *                                  (`{ activeMembers, quantity }`); 0 Stripe calls (X1)
  *  409 extra_mlos_exceed_quantity pfp-extra-signature below the active loginless MLOs
- *                                  (extra `{ activeLoginless, quantity }`); 0 Stripe calls
+ *                                  (`{ activeLoginless, quantity }`); 0 Stripe calls (X1)
  *  409 stale_quantity_rev · 400 contact_sales (above the add-on's maxQuantity) ·
  *  400 included_in_plan (Refi Radar on Pro/Team) · addon_price_not_configured
  *  R1's own: 404 addon_not_found · 409 addon_not_active · 409 addon_state_unknown ·
@@ -268,14 +281,64 @@ export const ADDON_QUANTITY_ERROR_CODES = [
 ] as const;
 export type AddOnQuantityErrorCode = (typeof ADDON_QUANTITY_ERROR_CODES)[number];
 
-export interface AddOnQuantityErrorBase {
-  success: false;
-  /** Human-readable. */
-  error: string;
-  code: AddOnQuantityErrorCode;
+/** The idempotency refusals every v1 billing mutation shares (uppercase, as R1 sends them): 400, 400, 422. */
+export const ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES = [
+  "IDEMPOTENCY_KEY_REQUIRED",
+  "IDEMPOTENCY_KEY_INVALID",
+  "IDEMPOTENCY_KEY_CONFLICT",
+] as const;
+export type AddOnQuantityIdempotencyErrorCode = (typeof ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES)[number];
+
+/** 409 extra_mlos_exceed_quantity, exactly. */
+export const extraMlosExceedQuantityErrorSchema = z.object({
+  success: z.literal(false),
+  error: z.string(),
+  code: z.literal("extra_mlos_exceed_quantity"),
+  activeLoginless: z.number().int().nonnegative(),
+  quantity: z.number().int().nonnegative(),
+});
+export type ExtraMlosExceedQuantityError = z.infer<typeof extraMlosExceedQuantityErrorSchema>;
+
+/** 409 members_exceed_quantity, exactly. */
+export const membersExceedQuantityErrorSchema = z.object({
+  success: z.literal(false),
+  error: z.string(),
+  code: z.literal("members_exceed_quantity"),
+  activeMembers: z.number().int().nonnegative(),
+  quantity: z.number().int().nonnegative(),
+});
+export type MembersExceedQuantityError = z.infer<typeof membersExceedQuantityErrorSchema>;
+
+/**
+ * Any other refusal the route gives. Not every answer carries a `code` or even
+ * `success`: R1's 400 invalid body, 404 add-on not found, 403 other app's
+ * add-on, 500 and 503 send `{ success: false, error }`; requireV1Auth's 401/403
+ * and the tenant-app guard send `{ error }`. A code is one of
+ * {@link ADDON_QUANTITY_ERROR_CODES}, {@link ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES},
+ * or one a later Rello adds; extra fields (e.g. `convergence`) are kept.
+ */
+export const addOnQuantityOtherErrorSchema = z
+  .object({
+    success: z.literal(false).optional(),
+    /** Human-readable. */
+    error: z.string(),
+    code: z.string().optional(),
+  })
+  .loose();
+export type AddOnQuantityOtherError = z.infer<typeof addOnQuantityOtherErrorSchema>;
+
+/** Every refusal of the quantity PATCH. Narrow the exact domain branches with the guards below. */
+export const addOnQuantityErrorSchema = z.union([
+  extraMlosExceedQuantityErrorSchema,
+  membersExceedQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema,
+]);
+export type AddOnQuantityError = ExtraMlosExceedQuantityError | MembersExceedQuantityError | AddOnQuantityOtherError;
+
+export function isExtraMlosExceedQuantityError(e: unknown): e is ExtraMlosExceedQuantityError {
+  return extraMlosExceedQuantityErrorSchema.safeParse(e).success;
 }
 
-export type AddOnQuantityError =
-  | (AddOnQuantityErrorBase & { code: "extra_mlos_exceed_quantity"; activeLoginless: number; quantity: number })
-  | (AddOnQuantityErrorBase & { code: "members_exceed_quantity"; activeMembers: number; quantity: number })
-  | (AddOnQuantityErrorBase & { code: Exclude<AddOnQuantityErrorCode, "extra_mlos_exceed_quantity" | "members_exceed_quantity"> });
+export function isMembersExceedQuantityError(e: unknown): e is MembersExceedQuantityError {
+  return membersExceedQuantityErrorSchema.safeParse(e).success;
+}

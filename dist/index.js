@@ -2410,10 +2410,27 @@ var previewStaleErrorSchema = z4.object({
   error: z4.literal("preview_stale"),
   reason: z4.string().optional()
 });
+var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
 var addOnQuantityRequestSchema = z4.object({
   quantity: z4.number().int().nonnegative(),
   quantityRev: z4.union([z4.number().int().nonnegative(), z4.string().regex(/^\d{1,18}$/)])
 }).strict();
+var addOnQuantityResponseSchema = z4.object({
+  tenantAddOnId: z4.string(),
+  /** The quantity this revision asked for. */
+  quantity: z4.number().int().nonnegative(),
+  /** The revision, as a decimal string. */
+  quantityRev: z4.string(),
+  /** What Stripe bills now. */
+  billedQuantity: z4.number().int().nonnegative(),
+  /** A newer revision already superseded this one; Stripe converges on the newest. */
+  superseded: z4.boolean(),
+  /** X1: the TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). Absent from R1. */
+  status: z4.string().optional(),
+  /** X1: true when quantity 0 ended the add-on's own subscription. Absent from R1. */
+  subscriptionCanceled: z4.boolean().optional()
+});
 var ADDON_QUANTITY_ERROR_CODES = [
   "members_exceed_quantity",
   "extra_mlos_exceed_quantity",
@@ -2428,6 +2445,42 @@ var ADDON_QUANTITY_ERROR_CODES = [
   "payment_method_required",
   "stripe_failed"
 ];
+var ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES = [
+  "IDEMPOTENCY_KEY_REQUIRED",
+  "IDEMPOTENCY_KEY_INVALID",
+  "IDEMPOTENCY_KEY_CONFLICT"
+];
+var extraMlosExceedQuantityErrorSchema = z4.object({
+  success: z4.literal(false),
+  error: z4.string(),
+  code: z4.literal("extra_mlos_exceed_quantity"),
+  activeLoginless: z4.number().int().nonnegative(),
+  quantity: z4.number().int().nonnegative()
+});
+var membersExceedQuantityErrorSchema = z4.object({
+  success: z4.literal(false),
+  error: z4.string(),
+  code: z4.literal("members_exceed_quantity"),
+  activeMembers: z4.number().int().nonnegative(),
+  quantity: z4.number().int().nonnegative()
+});
+var addOnQuantityOtherErrorSchema = z4.object({
+  success: z4.literal(false).optional(),
+  /** Human-readable. */
+  error: z4.string(),
+  code: z4.string().optional()
+}).loose();
+var addOnQuantityErrorSchema = z4.union([
+  extraMlosExceedQuantityErrorSchema,
+  membersExceedQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema
+]);
+function isExtraMlosExceedQuantityError(e) {
+  return extraMlosExceedQuantityErrorSchema.safeParse(e).success;
+}
+function isMembersExceedQuantityError(e) {
+  return membersExceedQuantityErrorSchema.safeParse(e).success;
+}
 
 // src/index.ts
 function createRelloClient(config) {
@@ -2438,6 +2491,9 @@ function createServiceClient(config) {
 }
 export {
   ADDON_QUANTITY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
+  ADDON_QUANTITY_IDEMPOTENCY_HEADER,
+  ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource,
   AuthResource,
   PLAN_SWITCH_ERROR_CODES,
@@ -2454,7 +2510,10 @@ export {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  addOnQuantityErrorSchema,
+  addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,
+  addOnQuantityResponseSchema,
   agentProvisionPayloadSchema,
   businessIndustry,
   businessType,
@@ -2465,6 +2524,7 @@ export {
   createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
+  extraMlosExceedQuantityErrorSchema,
   feeChangedConflict,
   feeNotFound,
   feeSlugQuery,
@@ -2479,8 +2539,11 @@ export {
   getRelloBaseUrl,
   hasPropertyEngineCredentials,
   internalError,
+  isExtraMlosExceedQuantityError,
+  isMembersExceedQuantityError,
   loginlessAgentCreateRequestSchema,
   loginlessAgentRemoveRequestSchema,
+  membersExceedQuantityErrorSchema,
   oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,
