@@ -55,7 +55,8 @@ test("loginless-agent remove and team-member requests are strict", () => {
   assert.equal(r.data.email, "new@example.com");
   assert.equal(api.teamMemberCreateRequestSchema.safeParse({ ...tm, role: "PLATFORM_ADMIN" }).success, false);
   assert.equal(api.teamMemberRemoveRequestSchema.safeParse({ tenantId: "t1", actingRelloUserId: "u1" }).success, true);
-  assert.equal(api.teamMemberSignInLinkRequestSchema.safeParse({ tenantId: "t1", actingRelloUserId: "u1" }).success, true);
+  // v2.35.0: the resend carries a requestId (x2b-team-roster-read.test.mjs).
+  assert.equal(api.teamMemberSignInLinkRequestSchema.safeParse({ tenantId: "t1", actingRelloUserId: "u1", requestId: "req-abcdefgh" }).success, true);
 });
 
 test("the refusal codes are one closed list, including both quantity codes", () => {
