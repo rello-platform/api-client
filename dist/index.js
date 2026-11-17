@@ -2557,7 +2557,12 @@ var switchInProgressErrorSchema = z4.object({
   error: z4.literal("switch_in_progress"),
   operationId: z4.string().min(1)
 });
-var planSwitchOtherErrorSchema = z4.object({ error: z4.string().min(1), message: z4.string().optional() }).loose();
+var PLAN_SWITCH_DEDICATED_ERROR_CODES = ["members_exceed_target", "preview_stale", "switch_in_progress"];
+var DEDICATED_CODES = new Set(PLAN_SWITCH_DEDICATED_ERROR_CODES);
+var planSwitchOtherErrorSchema = z4.object({
+  error: z4.string().min(1).refine((code) => !DEDICATED_CODES.has(code), { message: "this code has its own schema" }),
+  message: z4.string().optional()
+}).loose();
 var planSwitchErrorSchema = z4.union([
   membersExceedTargetErrorSchema,
   previewStaleErrorSchema,
@@ -2734,6 +2739,7 @@ export {
   AdminResource,
   AuthResource,
   PLAN_GRANTS_READ_ERROR_CODES,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS,

@@ -51,10 +51,29 @@ next free version when it merges).
   - 409 `members_exceed_target`: `{ error: "members_exceed_target",
     activeMembers, targetLimit, message? }`, strict, non-negative integers —
     the plan-switch envelope with X1's counts (ruling 1248 Q2).
+  - `planSwitchErrorSchema` parses a dedicated code only through its own
+    schema (AUDIT 111 GD-2146, KA 1275). `planSwitchOtherErrorSchema`, the open
+    branch, refuses `members_exceed_target`, `preview_stale` and
+    `switch_in_progress` (`PLAN_SWITCH_DEDICATED_ERROR_CODES`), so a malformed
+    one is refused rather than accepted. Every other code parses there,
+    including a future one.
+
+### Changed — `PlanSwitchError` (type only; no known consumer)
+
+- `PlanSwitchError`'s `members_exceed_target` branch now requires
+  `activeMembers` and `targetLimit`: the envelope ruled in 1248. In v2.36.0 it
+  was part of the generic `{ error, message? }` branch. A value assigned as
+  `{ error: "members_exceed_target", message }` with no counts no longer
+  compiles (AUDIT 111 GD-2147).
+- KA compatibility exception (1275): the KA checked every app's origin/main for
+  `PlanSwitchError` outside tests and found 0 consumers.
 - Every schema is `satisfies z.ZodType<Interface>`, so it can't drift from its
   type.
 
-Tests, red on v2.36.0's dist (16 of 16) and green on this one:
+Tests, red on v2.36.0's dist (16 of 16) and green on this one (plus
+`tests/gd2146-plan-switch-error-family.test.mjs`: the auditor's five malformed
+bodies are refused, and well-formed, non-dedicated and future codes still
+parse; red 3 of 4 on the first v2.37.0 head):
 - `tests/p1-v1-billing-served.test.mjs` parses Rello's REAL served bodies
   (`tests/fixtures/rello-v1-billing-served-dd8e6c00c.json`, captured from
   Rello's own route tests on real Postgres). It covers plan-grants 200s in

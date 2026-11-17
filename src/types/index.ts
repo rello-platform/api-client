@@ -276,6 +276,7 @@ export {
   planSwitchOperationResponseSchema,
   switchInProgressErrorSchema,
   planSwitchOtherErrorSchema,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES,
   planSwitchErrorSchema,
   isMembersExceedTargetError,
 } from "./billing-switch.js";

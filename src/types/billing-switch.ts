@@ -314,22 +314,38 @@ export const switchInProgressErrorSchema = z.object({
 export type SwitchInProgressError = z.infer<typeof switchInProgressErrorSchema>;
 
 /**
- * Any other plan-switch refusal: `{ error: <code>, message? }`. `error` is a
- * plain string on the wire (like preview_stale's `reason`), so a code Rello
- * adds later is still an answer; compare it against {@link PLAN_SWITCH_ERROR_CODES}.
- * Extra fields are kept.
+ * The plan-switch codes that have their own exact schema. A body naming one of
+ * these is that refusal or nothing: it never parses through the open branch
+ * below (AUDIT 111 GD-2146, KA 1275).
+ */
+export const PLAN_SWITCH_DEDICATED_ERROR_CODES = ["members_exceed_target", "preview_stale", "switch_in_progress"] as const;
+const DEDICATED_CODES: ReadonlySet<string> = new Set(PLAN_SWITCH_DEDICATED_ERROR_CODES);
+
+/**
+ * Any OTHER plan-switch refusal: `{ error: <code>, message? }`, for every code
+ * that has no dedicated schema. `error` is a plain string on the wire (like
+ * preview_stale's `reason`), so a code Rello adds later is still an answer;
+ * compare it against {@link PLAN_SWITCH_ERROR_CODES}. Extra fields are kept.
+ * A code in {@link PLAN_SWITCH_DEDICATED_ERROR_CODES} is refused here: it must
+ * pass its own schema.
  */
 export const planSwitchOtherErrorSchema = z
-  .object({ error: z.string().min(1), message: z.string().optional() })
+  .object({
+    error: z
+      .string()
+      .min(1)
+      .refine((code) => !DEDICATED_CODES.has(code), { message: "this code has its own schema" }),
+    message: z.string().optional(),
+  })
   .loose();
 export type PlanSwitchOtherError = z.infer<typeof planSwitchOtherErrorSchema>;
 
 /**
- * Every plan-switch refusal. The exact branches are tried first, so a body
- * that names `members_exceed_target`, `preview_stale` or `switch_in_progress`
- * but breaks that branch's shape fails those branches; it can still match the
- * open branch, so use the guards below (or `error` + the exact schema) to act
- * on one.
+ * Every plan-switch refusal. A body naming `members_exceed_target`,
+ * `preview_stale` or `switch_in_progress` parses only through that code's own
+ * schema, so a malformed one (missing or negative counts, a non-string reason,
+ * no operationId) is refused, never accepted through the open branch. Any other
+ * code, a future one included, parses through the open branch.
  */
 export const planSwitchErrorSchema = z.union([
   membersExceedTargetErrorSchema,

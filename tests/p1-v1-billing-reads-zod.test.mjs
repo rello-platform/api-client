@@ -152,7 +152,11 @@ test("plan switch: every refusal parses with planSwitchErrorSchema; the exact br
   ok(api.switchInProgressErrorSchema, { error: "switch_in_progress", operationId: "op_9" }, "in progress exact");
   bad(api.switchInProgressErrorSchema, { error: "switch_in_progress" }, "in progress without operationId");
   ok(api.planSwitchErrorSchema, { error: "preview_stale", reason: "inputs_changed" }, "stale");
-  for (const code of api.PLAN_SWITCH_ERROR_CODES) ok(api.planSwitchErrorSchema, { error: code, message: "m", ...(code === "switch_in_progress" ? { operationId: "op" } : {}) }, code);
+  // Each code with the fields its own schema requires (GD-2146: a dedicated code
+  // parses only through its own schema, so members_exceed_target needs its counts).
+  const required = { switch_in_progress: { operationId: "op" }, members_exceed_target: { activeMembers: 7, targetLimit: 5 } };
+  for (const code of api.PLAN_SWITCH_ERROR_CODES) ok(api.planSwitchErrorSchema, { error: code, message: "m", ...(required[code] ?? {}) }, code);
+  bad(api.planSwitchErrorSchema, { error: "members_exceed_target", message: "m" }, "members_exceed_target without its counts");
   ok(api.planSwitchErrorSchema, { error: "a_future_code" }, "a code Rello adds later is still an answer");
   bad(api.planSwitchErrorSchema, { message: "no error" }, "no error field");
 });

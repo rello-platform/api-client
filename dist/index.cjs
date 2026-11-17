@@ -30,6 +30,7 @@ __export(index_exports, {
   AdminResource: () => AdminResource,
   AuthResource: () => AuthResource,
   PLAN_GRANTS_READ_ERROR_CODES: () => PLAN_GRANTS_READ_ERROR_CODES,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES: () => PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES: () => PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS: () => PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS: () => PREVIEW_STALE_REASONS,
@@ -2708,7 +2709,12 @@ var switchInProgressErrorSchema = import_zod4.z.object({
   error: import_zod4.z.literal("switch_in_progress"),
   operationId: import_zod4.z.string().min(1)
 });
-var planSwitchOtherErrorSchema = import_zod4.z.object({ error: import_zod4.z.string().min(1), message: import_zod4.z.string().optional() }).loose();
+var PLAN_SWITCH_DEDICATED_ERROR_CODES = ["members_exceed_target", "preview_stale", "switch_in_progress"];
+var DEDICATED_CODES = new Set(PLAN_SWITCH_DEDICATED_ERROR_CODES);
+var planSwitchOtherErrorSchema = import_zod4.z.object({
+  error: import_zod4.z.string().min(1).refine((code) => !DEDICATED_CODES.has(code), { message: "this code has its own schema" }),
+  message: import_zod4.z.string().optional()
+}).loose();
 var planSwitchErrorSchema = import_zod4.z.union([
   membersExceedTargetErrorSchema,
   previewStaleErrorSchema,
@@ -2886,6 +2892,7 @@ function createServiceClient(config) {
   AdminResource,
   AuthResource,
   PLAN_GRANTS_READ_ERROR_CODES,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS,
