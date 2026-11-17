@@ -298,7 +298,7 @@ export type {
   PlanSwitchOtherError,
 } from "./types/index.js";
 
-// PFP Gateway P-1: tenant-bound v1 billing reads (plan grants)
+// PFP Gateway P-1: tenant-bound v1 billing reads (plan grants, add-ons) and the add-on start
 export {
   V1_TENANT_MATCH_ERRORS,
   appNotEnabledForTenantError,
@@ -306,12 +306,34 @@ export {
   planGrantsReadResponseSchema,
   PLAN_GRANTS_READ_ERROR_CODES,
   planGrantsReadErrorSchema,
+  addOnUnitPriceSchema,
+  TENANT_ADD_ON_STATUSES,
+  v1AddOnTenantSubscriptionSchema,
+  v1AddOnReadSchema,
+  v1AddOnsReadResponseSchema,
+  ADD_ONS_READ_ERROR_CODES,
+  addOnsReadErrorSchema,
+  ADD_ON_START_IDEMPOTENCY_HEADER,
+  addOnStartRequestSchema,
+  addOnStartResponseSchema,
+  addOnStartErrorSchema,
+  ADD_ON_START_ERROR_CODES,
 } from "./types/index.js";
 export type {
   V1TenantMatchError,
   PlanGrantsReadResponse,
   PlanGrantsReadErrorCode,
   PlanGrantsReadError,
+  AddOnUnitPrice,
+  V1AddOnTenantSubscription,
+  V1AddOnRead,
+  V1AddOnsReadResponse,
+  AddOnsReadErrorCode,
+  AddOnsReadError,
+  AddOnStartRequest,
+  AddOnStartResponse,
+  AddOnStartError,
+  AddOnStartErrorCode,
 } from "./types/index.js";
 
 // PFP Gateway G-SETUP + G-A2P (setup charge, texting registration)

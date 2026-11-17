@@ -24,6 +24,9 @@ __export(index_exports, {
   ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES: () => ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
   ADDON_QUANTITY_IDEMPOTENCY_HEADER: () => ADDON_QUANTITY_IDEMPOTENCY_HEADER,
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: () => ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
+  ADD_ONS_READ_ERROR_CODES: () => ADD_ONS_READ_ERROR_CODES,
+  ADD_ON_START_ERROR_CODES: () => ADD_ON_START_ERROR_CODES,
+  ADD_ON_START_IDEMPOTENCY_HEADER: () => ADD_ON_START_IDEMPOTENCY_HEADER,
   AdminResource: () => AdminResource,
   AuthResource: () => AuthResource,
   PLAN_GRANTS_READ_ERROR_CODES: () => PLAN_GRANTS_READ_ERROR_CODES,
@@ -41,11 +44,17 @@ __export(index_exports, {
   RelloUnavailableError: () => RelloUnavailableError,
   RelloValidationError: () => RelloValidationError,
   ServiceClient: () => ServiceClient,
+  TENANT_ADD_ON_STATUSES: () => TENANT_ADD_ON_STATUSES,
   V1_TENANT_MATCH_ERRORS: () => V1_TENANT_MATCH_ERRORS,
   addOnQuantityErrorSchema: () => addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema: () => addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema: () => addOnQuantityRequestSchema,
   addOnQuantityResponseSchema: () => addOnQuantityResponseSchema,
+  addOnStartErrorSchema: () => addOnStartErrorSchema,
+  addOnStartRequestSchema: () => addOnStartRequestSchema,
+  addOnStartResponseSchema: () => addOnStartResponseSchema,
+  addOnUnitPriceSchema: () => addOnUnitPriceSchema,
+  addOnsReadErrorSchema: () => addOnsReadErrorSchema,
   agentProvisionPayloadSchema: () => agentProvisionPayloadSchema,
   alreadyMemberSchema: () => alreadyMemberSchema,
   appNotEnabledForTenantError: () => appNotEnabledForTenantError,
@@ -133,6 +142,9 @@ __export(index_exports, {
   tenantEnablePayloadSchema: () => tenantEnablePayloadSchema,
   tenantPlanGrantsSchema: () => tenantPlanGrantsSchema,
   tenantProvisioningPayloadSchema: () => tenantProvisioningPayloadSchema,
+  v1AddOnReadSchema: () => v1AddOnReadSchema,
+  v1AddOnTenantSubscriptionSchema: () => v1AddOnTenantSubscriptionSchema,
+  v1AddOnsReadResponseSchema: () => v1AddOnsReadResponseSchema,
   v1TenantMatchErrorSchema: () => v1TenantMatchErrorSchema
 });
 module.exports = __toCommonJS(index_exports);
@@ -2798,6 +2810,62 @@ var planGrantsReadResponseSchema = import_zod5.z.object({
 });
 var PLAN_GRANTS_READ_ERROR_CODES = ["no_plan_grants", "plan_grants_unavailable"];
 var planGrantsReadErrorSchema = import_zod5.z.object({ error: import_zod5.z.enum(PLAN_GRANTS_READ_ERROR_CODES) });
+var addOnUnitPriceSchema = import_zod5.z.object({
+  monthly: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+  yearly: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+});
+var TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"];
+var v1AddOnTenantSubscriptionSchema = import_zod5.z.object({
+  status: import_zod5.z.string().min(1),
+  quantity: import_zod5.z.number().int().nonnegative(),
+  requestedQuantity: import_zod5.z.number().int().nonnegative().nullable(),
+  quantityRev: import_zod5.z.string().regex(/^\d{1,19}$/).nullable(),
+  trialEndsAt: import_zod5.z.string().datetime({ offset: true }).nullable()
+});
+var v1AddOnReadSchema = import_zod5.z.object({
+  id: import_zod5.z.string().min(1),
+  appSlug: import_zod5.z.string().min(1),
+  name: import_zod5.z.string().min(1),
+  type: import_zod5.z.enum(["RECURRING", "ONE_TIME"]),
+  isActive: import_zod5.z.boolean(),
+  price: addOnUnitPriceSchema,
+  tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable()
+});
+var v1AddOnsReadResponseSchema = import_zod5.z.object({ addOns: import_zod5.z.array(v1AddOnReadSchema) });
+var ADD_ONS_READ_ERROR_CODES = ["add_ons_unavailable"];
+var addOnsReadErrorSchema = import_zod5.z.object({ error: import_zod5.z.enum(ADD_ONS_READ_ERROR_CODES) });
+var ADD_ON_START_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var addOnStartRequestSchema = import_zod5.z.object({
+  addOnId: import_zod5.z.string().min(1),
+  quantity: import_zod5.z.number().int().positive().optional(),
+  trial: import_zod5.z.boolean().optional(),
+  quantityRev: import_zod5.z.union([import_zod5.z.number().int().nonnegative(), import_zod5.z.string().regex(/^\d{1,18}$/)]).optional()
+}).strict();
+var addOnStartResponseSchema = import_zod5.z.object({
+  success: import_zod5.z.literal(true),
+  data: import_zod5.z.object({
+    tenantAddOnId: import_zod5.z.string().min(1),
+    status: import_zod5.z.string().min(1),
+    trialEndsAt: import_zod5.z.string().datetime({ offset: true }).nullable().optional()
+  })
+});
+var addOnStartErrorSchema = import_zod5.z.object({
+  success: import_zod5.z.literal(false),
+  error: import_zod5.z.string().min(1),
+  code: import_zod5.z.string().min(1).optional()
+}).loose();
+var ADD_ON_START_ERROR_CODES = [
+  "not_a_check_your_rate_addon",
+  "payment_method_required",
+  "tenant_not_found",
+  "addon_already_active",
+  "addon_state_unknown",
+  "already_entitled",
+  "engine_required",
+  "trial_already_used",
+  "addon_pricing_not_configured",
+  "stripe_failed"
+];
 
 // src/index.ts
 function createRelloClient(config) {
@@ -2812,6 +2880,9 @@ function createServiceClient(config) {
   ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
   ADDON_QUANTITY_IDEMPOTENCY_HEADER,
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
+  ADD_ONS_READ_ERROR_CODES,
+  ADD_ON_START_ERROR_CODES,
+  ADD_ON_START_IDEMPOTENCY_HEADER,
   AdminResource,
   AuthResource,
   PLAN_GRANTS_READ_ERROR_CODES,
@@ -2829,11 +2900,17 @@ function createServiceClient(config) {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  TENANT_ADD_ON_STATUSES,
   V1_TENANT_MATCH_ERRORS,
   addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,
   addOnQuantityResponseSchema,
+  addOnStartErrorSchema,
+  addOnStartRequestSchema,
+  addOnStartResponseSchema,
+  addOnUnitPriceSchema,
+  addOnsReadErrorSchema,
   agentProvisionPayloadSchema,
   alreadyMemberSchema,
   appNotEnabledForTenantError,
@@ -2921,6 +2998,9 @@ function createServiceClient(config) {
   tenantEnablePayloadSchema,
   tenantPlanGrantsSchema,
   tenantProvisioningPayloadSchema,
+  v1AddOnReadSchema,
+  v1AddOnTenantSubscriptionSchema,
+  v1AddOnsReadResponseSchema,
   v1TenantMatchErrorSchema
 });
 //# sourceMappingURL=index.cjs.map

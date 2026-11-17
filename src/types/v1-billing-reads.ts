@@ -3,13 +3,15 @@
  * §4.2 "Read-through on unknown"; Platform KA prompt 1221, rulings 1220/1247).
  * One contract for Rello's routes and PathfinderPro's callers.
  *
- *   GET /api/v1/billing/plan-grants   permission billing:plan-grants:read
+ *   GET  /api/v1/billing/plan-grants   permission billing:plan-grants:read
+ *   GET  /api/v1/billing/add-ons       permission billing:read
+ *   POST /api/v1/billing/add-on        permission billing:write  (the start; R1)
  *
  * Auth: `Authorization: Bearer <ApiKey>` (Rello's ApiKey table, targetApp RELLO)
  * with the route's permission, then §4.2's tenant match (Rello's
  * `requireV1TenantMatch`). The tenant is the key's own, or `X-Tenant-Id` for a
- * tenant-null key; never a body. The answers are flat JSON (no
- * `{ success, data }` envelope).
+ * tenant-null key; never a body. The two reads answer flat JSON (no
+ * `{ success, data }` envelope); the POST start keeps R1's envelope.
  */
 import { z } from "zod";
 import { tenantCyrStateSchema } from "./provisioning.js";
@@ -65,9 +67,143 @@ export type PlanGrantsReadResponse = z.infer<typeof planGrantsReadResponseSchema
  *    marker and the state together); the caller still treats it as unknown.
  *  - 503 `plan_grants_unavailable`: Rello could not read the state, or holds a
  *    row it cannot serve. Unknown: retry, never "no grants".
+ *
+ * `cyr.canceledAt` is always null on this read, CANCELED included (KA ruling
+ * 1261): Rello stores no canceledAt for the record, so a CANCELED record comes
+ * with `canceledAt: null` and `occurredAt` = the record's last change. Use
+ * `occurredAt` as the cancel time; it can only be later than the true one.
  */
 export const PLAN_GRANTS_READ_ERROR_CODES = ["no_plan_grants", "plan_grants_unavailable"] as const;
 export type PlanGrantsReadErrorCode = (typeof PLAN_GRANTS_READ_ERROR_CODES)[number];
 
 export const planGrantsReadErrorSchema = z.object({ error: z.enum(PLAN_GRANTS_READ_ERROR_CODES) });
 export type PlanGrantsReadError = z.infer<typeof planGrantsReadErrorSchema>;
+
+// ─── GET /api/v1/billing/add-ons ────────────────────────────────────────────
+
+/**
+ * What Rello would charge this tenant for ONE unit of the add-on, per interval,
+ * in integer cents: the price the POST start charges, read from the catalog row
+ * that holds it. No Stripe call.
+ *
+ * `null` means UNKNOWN, never $0: Rello holds no Stripe price for that interval
+ * (a POST would refuse `addon_pricing_not_configured`) or the amount can't be
+ * read. A determined `0` is a real $0. A ONE_TIME add-on has no per-interval
+ * price, so both are null and `type` says why.
+ */
+export const addOnUnitPriceSchema = z.object({
+  monthly: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+  yearly: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+});
+export type AddOnUnitPrice = z.infer<typeof addOnUnitPriceSchema>;
+
+/** Rello's SubscriptionStatus values today. `status` parses as a plain string so a later status never fails the read. */
+export const TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"] as const;
+
+/**
+ * This tenant's subscription to the add-on (Rello's TenantAddOn), or null when
+ * there is none. `quantityRev` is a BIGINT, sent as a decimal string so it is
+ * exact past Number.MAX_SAFE_INTEGER; compare it with BigInt(), never Number().
+ */
+export const v1AddOnTenantSubscriptionSchema = z.object({
+  status: z.string().min(1),
+  quantity: z.number().int().nonnegative(),
+  requestedQuantity: z.number().int().nonnegative().nullable(),
+  quantityRev: z.string().regex(/^\d{1,19}$/).nullable(),
+  trialEndsAt: z.string().datetime({ offset: true }).nullable(),
+});
+export type V1AddOnTenantSubscription = z.infer<typeof v1AddOnTenantSubscriptionSchema>;
+
+/** One add-on the caller's app owns, active or not (`isActive` false = retired from sale; existing subscribers keep it). */
+export const v1AddOnReadSchema = z.object({
+  id: z.string().min(1),
+  appSlug: z.string().min(1),
+  name: z.string().min(1),
+  type: z.enum(["RECURRING", "ONE_TIME"]),
+  isActive: z.boolean(),
+  price: addOnUnitPriceSchema,
+  tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable(),
+});
+export type V1AddOnRead = z.infer<typeof v1AddOnReadSchema>;
+
+/**
+ * 200. Only the calling app's add-ons, ordered by name then id. Never another
+ * app's add-on and never another tenant's subscription.
+ *
+ * Before PathfinderPro can call this, `billing:read` must be granted to
+ * pathfinder-pro and carried on its RELLO-targeted ApiKey.
+ */
+export const v1AddOnsReadResponseSchema = z.object({ addOns: z.array(v1AddOnReadSchema) });
+export type V1AddOnsReadResponse = z.infer<typeof v1AddOnsReadResponseSchema>;
+
+/** 503 `add_ons_unavailable`: a read failed. Unknown: retry, never "no add-ons". */
+export const ADD_ONS_READ_ERROR_CODES = ["add_ons_unavailable"] as const;
+export type AddOnsReadErrorCode = (typeof ADD_ONS_READ_ERROR_CODES)[number];
+export const addOnsReadErrorSchema = z.object({ error: z.enum(ADD_ONS_READ_ERROR_CODES) });
+export type AddOnsReadError = z.infer<typeof addOnsReadErrorSchema>;
+
+// ─── POST /api/v1/billing/add-on (the start, R1) ────────────────────────────
+
+/** The idempotency header the POST requires: 8–128 characters, one per intended start. */
+export const ADD_ON_START_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+
+/**
+ * The body, strict: an unknown field (a coupon, a tenant) is a 400.
+ * `quantity` defaults to 1 on Rello. `trial` (Check Your Rate only) asks for the
+ * one 14-day no-card trial. `quantityRev` (Check Your Rate) is PFP's monotonic
+ * revision of the page count: an integer, or a decimal string of 1–18 digits.
+ */
+export const addOnStartRequestSchema = z
+  .object({
+    addOnId: z.string().min(1),
+    quantity: z.number().int().positive().optional(),
+    trial: z.boolean().optional(),
+    quantityRev: z.union([z.number().int().nonnegative(), z.string().regex(/^\d{1,18}$/)]).optional(),
+  })
+  .strict();
+export type AddOnStartRequest = z.infer<typeof addOnStartRequestSchema>;
+
+/**
+ * 200, R1's envelope. A same-key retry answers the first result again.
+ * `trialEndsAt` is present for Check Your Rate (null when not trialing) and
+ * absent for any other add-on.
+ */
+export const addOnStartResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    tenantAddOnId: z.string().min(1),
+    status: z.string().min(1),
+    trialEndsAt: z.string().datetime({ offset: true }).nullable().optional(),
+  }),
+});
+export type AddOnStartResponse = z.infer<typeof addOnStartResponseSchema>;
+
+/**
+ * A refusal from the route itself: `{ success: false, error, code? }` plus the
+ * fields a code carries (`needsPaymentMethod`, `coveredSeats`, ...), kept by
+ * `.loose()`. `code` is a plain string so a later code never fails the parse.
+ * requireV1Auth's own 401/403 are `{ error }` alone (v1TenantMatchErrorSchema).
+ */
+export const addOnStartErrorSchema = z
+  .object({
+    success: z.literal(false),
+    error: z.string().min(1),
+    code: z.string().min(1).optional(),
+  })
+  .loose();
+export type AddOnStartError = z.infer<typeof addOnStartErrorSchema>;
+
+/** The codes R1's Check Your Rate start answers today, for callers that branch on them. */
+export const ADD_ON_START_ERROR_CODES = [
+  "not_a_check_your_rate_addon",
+  "payment_method_required",
+  "tenant_not_found",
+  "addon_already_active",
+  "addon_state_unknown",
+  "already_entitled",
+  "engine_required",
+  "trial_already_used",
+  "addon_pricing_not_configured",
+  "stripe_failed",
+] as const;
+export type AddOnStartErrorCode = (typeof ADD_ON_START_ERROR_CODES)[number];
