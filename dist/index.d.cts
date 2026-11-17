@@ -2821,6 +2821,102 @@ interface LoginQuantityNeeded extends RosterError {
     members: number;
     addOnCatalogKey: "pfp-extra-team-login";
 }
+/** 201 / 200 of POST /api/provisioning/loginless-agent. */
+declare const loginlessAgentCreateResponseSchema: z.ZodObject<{
+    relloAgentId: z.ZodString;
+    slug: z.ZodString;
+    email: z.ZodString;
+    replayed: z.ZodBoolean;
+}, z.core.$strip>;
+/** 200 of POST /api/provisioning/loginless-agent/[agentId]/remove. */
+declare const loginlessAgentRemoveResponseSchema: z.ZodObject<{
+    relloAgentId: z.ZodString;
+    status: z.ZodLiteral<"INACTIVE">;
+    alreadyInactive: z.ZodBoolean;
+}, z.core.$strip>;
+/** 201 / 200 of POST /api/provisioning/team-member. */
+declare const teamMemberCreateResponseSchema: z.ZodObject<{
+    userId: z.ZodString;
+    relloAgentId: z.ZodString;
+    email: z.ZodString;
+    signInEmail: z.ZodLiteral<"queued">;
+    replayed: z.ZodBoolean;
+}, z.core.$strip>;
+/** 202 / 200 of POST /api/provisioning/team-member/[userId]/sign-in-link. */
+declare const teamMemberSignInLinkResponseSchema: z.ZodObject<{
+    userId: z.ZodString;
+    signInEmail: z.ZodLiteral<"queued">;
+    replayed: z.ZodBoolean;
+}, z.core.$strip>;
+/** 200 of POST /api/provisioning/team-member/[userId]/remove. */
+declare const teamMemberRemoveResponseSchema: z.ZodObject<{
+    userId: z.ZodString;
+    isActive: z.ZodLiteral<false>;
+    alreadyInactive: z.ZodBoolean;
+}, z.core.$strip>;
+declare const teamLoginRosterMemberSchema: z.ZodObject<{
+    userId: z.ZodString;
+    relloAgentId: z.ZodNullable<z.ZodString>;
+    email: z.ZodString;
+    firstName: z.ZodString;
+    lastName: z.ZodString;
+    role: z.ZodString;
+    isOwner: z.ZodBoolean;
+}, z.core.$strip>;
+/** 200 of GET /api/provisioning/team-member. `included` and `capacity` are null together (the plan sets no limit). */
+declare const teamLoginRosterResponseSchema: z.ZodObject<{
+    included: z.ZodNullable<z.ZodNumber>;
+    purchased: z.ZodNumber;
+    capacity: z.ZodNullable<z.ZodNumber>;
+    members: z.ZodNumber;
+    overBy: z.ZodNumber;
+    addOnCatalogKey: z.ZodLiteral<"pfp-extra-team-login">;
+    people: z.ZodArray<z.ZodObject<{
+        userId: z.ZodString;
+        relloAgentId: z.ZodNullable<z.ZodString>;
+        email: z.ZodString;
+        firstName: z.ZodString;
+        lastName: z.ZodString;
+        role: z.ZodString;
+        isOwner: z.ZodBoolean;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+/**
+ * Every non-2xx roster body: `{ code, error, ...extra }`. `code` is a plain
+ * string on the wire, so a code Rello adds later never makes an older caller
+ * refuse the answer; compare it against {@link ROSTER_ERROR_CODES}
+ * ({@link isRosterErrorCode}). Extra fields are kept.
+ */
+declare const rosterErrorSchema: z.ZodObject<{
+    code: z.ZodString;
+    error: z.ZodString;
+}, z.core.$loose>;
+type RosterErrorParsed = z.infer<typeof rosterErrorSchema>;
+declare function isRosterErrorCode(code: unknown): code is RosterErrorCode;
+/** 409 signature_quantity_needed, exactly. */
+declare const signatureQuantityNeededSchema: z.ZodObject<{
+    code: z.ZodLiteral<"signature_quantity_needed">;
+    error: z.ZodString;
+    purchased: z.ZodNumber;
+    extras: z.ZodNumber;
+    addOnCatalogKey: z.ZodLiteral<"pfp-extra-signature">;
+}, z.core.$strip>;
+/** 409 already_member, exactly. */
+declare const alreadyMemberSchema: z.ZodObject<{
+    code: z.ZodLiteral<"already_member">;
+    error: z.ZodString;
+    userId: z.ZodString;
+    isActive: z.ZodBoolean;
+}, z.core.$strip>;
+/** 409 login_quantity_needed, exactly. */
+declare const loginQuantityNeededSchema: z.ZodObject<{
+    code: z.ZodLiteral<"login_quantity_needed">;
+    error: z.ZodString;
+    included: z.ZodNumber;
+    purchased: z.ZodNumber;
+    members: z.ZodNumber;
+    addOnCatalogKey: z.ZodLiteral<"pfp-extra-team-login">;
+}, z.core.$strip>;
 
 /**
  * PFP Gateway G-SETUP + G-A2P: the one-time setup charge and the texting (A2P
@@ -3552,13 +3648,215 @@ declare const previewStaleErrorSchema: z.ZodObject<{
     reason: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 type PreviewStaleError = z.infer<typeof previewStaleErrorSchema>;
+/**
+ * `409 members_exceed_target` (KA 1229 ruling for PFP K-345/O-10, 2026-11-17):
+ * the target plan allows fewer logins than the account has active, so the
+ * switch is refused with nothing changed. The counts follow the X1 quantity
+ * PATCH's `members_exceed_quantity` (`{ activeMembers, quantity }`, Rello
+ * src/lib/billing/addon-quantity.ts:297 @be87ded94): `activeMembers` the
+ * active logins now, `targetLimit` what the target plan allows. Exact: no other
+ * field, so a count can never arrive under another name.
+ */
+declare const membersExceedTargetErrorSchema: z.ZodObject<{
+    error: z.ZodLiteral<"members_exceed_target">;
+    activeMembers: z.ZodNumber;
+    targetLimit: z.ZodNumber;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+type MembersExceedTargetError = z.infer<typeof membersExceedTargetErrorSchema>;
 type PlanSwitchError = PreviewStaleError | {
     error: "switch_in_progress";
     operationId: string;
-} | {
-    error: Exclude<PlanSwitchErrorCode, "preview_stale" | "switch_in_progress">;
+} | MembersExceedTargetError | {
+    error: Exclude<PlanSwitchErrorCode, "preview_stale" | "switch_in_progress" | "members_exceed_target">;
     message?: string;
 };
+declare const planSwitchPreviewLineSchema: z.ZodObject<{
+    description: z.ZodString;
+    amount: z.ZodNumber;
+    currency: z.ZodString;
+    period: z.ZodObject<{
+        start: z.ZodString;
+        end: z.ZodString;
+    }, z.core.$strip>;
+    proration: z.ZodBoolean;
+}, z.core.$strip>;
+declare const planSwitchPreviewSubscriptionSchema: z.ZodObject<{
+    kind: z.ZodEnum<{
+        plan: "plan";
+        addon: "addon";
+    }>;
+    lines: z.ZodArray<z.ZodObject<{
+        description: z.ZodString;
+        amount: z.ZodNumber;
+        currency: z.ZodString;
+        period: z.ZodObject<{
+            start: z.ZodString;
+            end: z.ZodString;
+        }, z.core.$strip>;
+        proration: z.ZodBoolean;
+    }, z.core.$strip>>;
+    total: z.ZodNumber;
+}, z.core.$strip>;
+/** 200 of GET /api/v1/billing/plan-switch/preview. */
+declare const planSwitchPreviewResponseSchema: z.ZodObject<{
+    previewId: z.ZodString;
+    expiresAt: z.ZodString;
+    prorationDate: z.ZodString;
+    requiresConfirmation: z.ZodBoolean;
+    subscriptions: z.ZodArray<z.ZodObject<{
+        kind: z.ZodEnum<{
+            plan: "plan";
+            addon: "addon";
+        }>;
+        lines: z.ZodArray<z.ZodObject<{
+            description: z.ZodString;
+            amount: z.ZodNumber;
+            currency: z.ZodString;
+            period: z.ZodObject<{
+                start: z.ZodString;
+                end: z.ZodString;
+            }, z.core.$strip>;
+            proration: z.ZodBoolean;
+        }, z.core.$strip>>;
+        total: z.ZodNumber;
+    }, z.core.$strip>>;
+    planChange: z.ZodObject<{
+        from: z.ZodString;
+        to: z.ZodString;
+        fromInterval: z.ZodEnum<{
+            month: "month";
+            year: "year";
+        }>;
+        toInterval: z.ZodEnum<{
+            month: "month";
+            year: "year";
+        }>;
+    }, z.core.$strip>;
+    chargeChange: z.ZodObject<{
+        carriedCheckYourRateSeat: z.ZodBoolean;
+        refiRadarDrops: z.ZodBoolean;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+declare const planSwitchStepSchema: z.ZodObject<{
+    index: z.ZodNumber;
+    kind: z.ZodString;
+    state: z.ZodEnum<{
+        PENDING: "PENDING";
+        IN_FLIGHT: "IN_FLIGHT";
+        DONE: "DONE";
+    }>;
+}, z.core.$strip>;
+/** 200 of POST /api/v1/billing/plan-switch: finished inside the request. */
+declare const planSwitchAppliedResponseSchema: z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"APPLIED">;
+    steps: z.ZodArray<z.ZodObject<{
+        index: z.ZodNumber;
+        kind: z.ZodString;
+        state: z.ZodEnum<{
+            PENDING: "PENDING";
+            IN_FLIGHT: "IN_FLIGHT";
+            DONE: "DONE";
+        }>;
+    }, z.core.$strip>>;
+    planSlug: z.ZodString;
+    interval: z.ZodEnum<{
+        month: "month";
+        year: "year";
+    }>;
+    invoiceIds: z.ZodArray<z.ZodString>;
+}, z.core.$strip>;
+/** 202 of POST /api/v1/billing/plan-switch: still running; poll the operation. */
+declare const planSwitchOpenResponseSchema: z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"OPEN">;
+}, z.core.$strip>;
+declare const planSwitchResponseSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"APPLIED">;
+    steps: z.ZodArray<z.ZodObject<{
+        index: z.ZodNumber;
+        kind: z.ZodString;
+        state: z.ZodEnum<{
+            PENDING: "PENDING";
+            IN_FLIGHT: "IN_FLIGHT";
+            DONE: "DONE";
+        }>;
+    }, z.core.$strip>>;
+    planSlug: z.ZodString;
+    interval: z.ZodEnum<{
+        month: "month";
+        year: "year";
+    }>;
+    invoiceIds: z.ZodArray<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"OPEN">;
+}, z.core.$strip>], "status">;
+/** 200 of GET /api/v1/billing/plan-switch/[operationId]. */
+declare const planSwitchOperationResponseSchema: z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodEnum<{
+        OPEN: "OPEN";
+        APPLIED: "APPLIED";
+        FAILED: "FAILED";
+        COMPENSATED: "COMPENSATED";
+    }>;
+    steps: z.ZodArray<z.ZodObject<{
+        index: z.ZodNumber;
+        kind: z.ZodString;
+        state: z.ZodEnum<{
+            PENDING: "PENDING";
+            IN_FLIGHT: "IN_FLIGHT";
+            DONE: "DONE";
+        }>;
+    }, z.core.$strip>>;
+    previewId: z.ZodNullable<z.ZodString>;
+    invoiceIds: z.ZodArray<z.ZodString>;
+    resolutionNeeded: z.ZodBoolean;
+    unknownSince: z.ZodNullable<z.ZodString>;
+}, z.core.$strip>;
+/** `409 switch_in_progress`: another switch for this tenant is running; poll it. */
+declare const switchInProgressErrorSchema: z.ZodObject<{
+    error: z.ZodLiteral<"switch_in_progress">;
+    operationId: z.ZodString;
+}, z.core.$strip>;
+type SwitchInProgressError = z.infer<typeof switchInProgressErrorSchema>;
+/**
+ * Any other plan-switch refusal: `{ error: <code>, message? }`. `error` is a
+ * plain string on the wire (like preview_stale's `reason`), so a code Rello
+ * adds later is still an answer; compare it against {@link PLAN_SWITCH_ERROR_CODES}.
+ * Extra fields are kept.
+ */
+declare const planSwitchOtherErrorSchema: z.ZodObject<{
+    error: z.ZodString;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>;
+type PlanSwitchOtherError = z.infer<typeof planSwitchOtherErrorSchema>;
+/**
+ * Every plan-switch refusal. The exact branches are tried first, so a body
+ * that names `members_exceed_target`, `preview_stale` or `switch_in_progress`
+ * but breaks that branch's shape fails those branches; it can still match the
+ * open branch, so use the guards below (or `error` + the exact schema) to act
+ * on one.
+ */
+declare const planSwitchErrorSchema: z.ZodUnion<readonly [z.ZodObject<{
+    error: z.ZodLiteral<"members_exceed_target">;
+    activeMembers: z.ZodNumber;
+    targetLimit: z.ZodNumber;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>, z.ZodObject<{
+    error: z.ZodLiteral<"preview_stale">;
+    reason: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    error: z.ZodLiteral<"switch_in_progress">;
+    operationId: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    error: z.ZodString;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>]>;
+declare function isMembersExceedTargetError(e: unknown): e is MembersExceedTargetError;
 /**
  * The idempotency key travels in this header, 8–128 characters (R1's
  * `src/lib/billing/v1/idempotency-header.ts`). A missing or malformed one is
@@ -3668,6 +3966,93 @@ declare function isExtraMlosExceedQuantityError(e: unknown): e is ExtraMlosExcee
 declare function isMembersExceedQuantityError(e: unknown): e is MembersExceedQuantityError;
 
 /**
+ * PFP Gateway P-1: Rello's tenant-bound v1 billing reads (SPEC-PFP-GATEWAY.md
+ * §4.2 "Read-through on unknown"; Platform KA prompt 1221, rulings 1220/1247).
+ * One contract for Rello's routes and PathfinderPro's callers.
+ *
+ *   GET /api/v1/billing/plan-grants   permission billing:plan-grants:read
+ *
+ * Auth: `Authorization: Bearer <ApiKey>` (Rello's ApiKey table, targetApp RELLO)
+ * with the route's permission, then §4.2's tenant match (Rello's
+ * `requireV1TenantMatch`). The tenant is the key's own, or `X-Tenant-Id` for a
+ * tenant-null key; never a body. The answers are flat JSON (no
+ * `{ success, data }` envelope).
+ */
+
+/**
+ * §4.2's three tenant 403 bodies, `{ error }`. They are textually distinct on
+ * purpose: one status code, three different causes. A permission 403 is the
+ * bare `{ error: "Forbidden" }` from requireV1Auth.
+ */
+declare const V1_TENANT_MATCH_ERRORS: Readonly<{
+    /** A tenant-scoped key sent an X-Tenant-Id naming another tenant. Nothing was read for either. */
+    readonly tenantHeaderMismatch: "Forbidden — tenant header does not match credential";
+    /** The key's app is not one these routes serve (pathfinder-pro today). */
+    readonly callerAppNotAllowed: "Forbidden — caller app not allowed";
+}>;
+/**
+ * The third tenant 403: a tenant-null key whose app is not enabled on the
+ * X-Tenant-Id tenant. PathfinderPro resolves it as UNKNOWN (503 with retry),
+ * never as "no grants": the app may be enabled a moment later.
+ */
+declare function appNotEnabledForTenantError(appSlug: string): string;
+declare const v1TenantMatchErrorSchema: z.ZodObject<{
+    error: z.ZodString;
+}, z.core.$strip>;
+type V1TenantMatchError = z.infer<typeof v1TenantMatchErrorSchema>;
+/**
+ * 200. `rev` is Rello's TenantPlanGrantState revision (a BIGINT, served as a
+ * safe integer; Rello answers 503 rather than round one it can't carry).
+ * `cyr` is REQUIRED and nullable: the tenant's effective Check Your Rate record
+ * (spec §4.3, the same fields as `billing.addon_changed`), or `null` when the
+ * tenant never held Check Your Rate. A body with no `cyr` key is not this
+ * answer, and must not be read as "never held" (A-286).
+ */
+declare const planGrantsReadResponseSchema: z.ZodObject<{
+    rev: z.ZodNumber;
+    grants: z.ZodArray<z.ZodString>;
+    planSlug: z.ZodString;
+    cyr: z.ZodNullable<z.ZodObject<{
+        featureSlug: z.ZodString;
+        status: z.ZodEnum<{
+            ACTIVE: "ACTIVE";
+            TRIALING: "TRIALING";
+            PAST_DUE: "PAST_DUE";
+            CANCELED: "CANCELED";
+        }>;
+        quantity: z.ZodNumber;
+        trialEndsAt: z.ZodNullable<z.ZodString>;
+        canceledAt: z.ZodNullable<z.ZodString>;
+        occurredAt: z.ZodString;
+        seq: z.ZodNumber;
+        source: z.ZodEnum<{
+            plan: "plan";
+            addon: "addon";
+            both: "both";
+        }>;
+        cause: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+type PlanGrantsReadResponse = z.infer<typeof planGrantsReadResponseSchema>;
+/**
+ * The read's own refusals, besides the tenant 403s and requireV1Auth's 401/403:
+ *  - 404 `no_plan_grants`: the read succeeded and the tenant has no grant state.
+ *    For a gateway-origin tenant that is a contract violation (Rello writes the
+ *    marker and the state together); the caller still treats it as unknown.
+ *  - 503 `plan_grants_unavailable`: Rello could not read the state, or holds a
+ *    row it cannot serve. Unknown: retry, never "no grants".
+ */
+declare const PLAN_GRANTS_READ_ERROR_CODES: readonly ["no_plan_grants", "plan_grants_unavailable"];
+type PlanGrantsReadErrorCode = (typeof PLAN_GRANTS_READ_ERROR_CODES)[number];
+declare const planGrantsReadErrorSchema: z.ZodObject<{
+    error: z.ZodEnum<{
+        no_plan_grants: "no_plan_grants";
+        plan_grants_unavailable: "plan_grants_unavailable";
+    }>;
+}, z.core.$strip>;
+type PlanGrantsReadError = z.infer<typeof planGrantsReadErrorSchema>;
+
+/**
  * implicit-apikey-telemetry — make the implicit-RELLO_API_KEY fallback COUNTABLE.
  *
  * WHY A WARNING ALONE IS NOT ENOUGH
@@ -3741,4 +4126,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanSwitchAppliedResponse, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, agentProvisionPayloadSchema, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, loginlessAgentCreateRequestSchema, loginlessAgentRemoveRequestSchema, membersExceedQuantityErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planSwitchPreviewQuerySchema, planSwitchRequestSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, teamLoginRosterQuerySchema, teamMemberCreateRequestSchema, teamMemberRemoveRequestSchema, teamMemberSignInLinkRequestSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema };
+export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MembersExceedTargetError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_GRANTS_READ_ERROR_CODES, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanGrantsReadError, type PlanGrantsReadErrorCode, type PlanGrantsReadResponse, type PlanSwitchAppliedResponse, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchOtherError, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type RosterErrorParsed, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type SwitchInProgressError, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type V1TenantMatchError, V1_TENANT_MATCH_ERRORS, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, agentProvisionPayloadSchema, alreadyMemberSchema, appNotEnabledForTenantError, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, isMembersExceedTargetError, isRosterErrorCode, loginQuantityNeededSchema, loginlessAgentCreateRequestSchema, loginlessAgentCreateResponseSchema, loginlessAgentRemoveRequestSchema, loginlessAgentRemoveResponseSchema, membersExceedQuantityErrorSchema, membersExceedTargetErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planGrantsReadErrorSchema, planGrantsReadResponseSchema, planSwitchAppliedResponseSchema, planSwitchErrorSchema, planSwitchOpenResponseSchema, planSwitchOperationResponseSchema, planSwitchOtherErrorSchema, planSwitchPreviewLineSchema, planSwitchPreviewQuerySchema, planSwitchPreviewResponseSchema, planSwitchPreviewSubscriptionSchema, planSwitchRequestSchema, planSwitchResponseSchema, planSwitchStepSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, rosterErrorSchema, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, signatureQuantityNeededSchema, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, switchInProgressErrorSchema, teamLoginRosterMemberSchema, teamLoginRosterQuerySchema, teamLoginRosterResponseSchema, teamMemberCreateRequestSchema, teamMemberCreateResponseSchema, teamMemberRemoveRequestSchema, teamMemberRemoveResponseSchema, teamMemberSignInLinkRequestSchema, teamMemberSignInLinkResponseSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema, v1TenantMatchErrorSchema };

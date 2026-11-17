@@ -201,10 +201,146 @@ export const previewStaleErrorSchema = z.object({
 });
 export type PreviewStaleError = z.infer<typeof previewStaleErrorSchema>;
 
+/**
+ * `409 members_exceed_target` (KA 1229 ruling for PFP K-345/O-10, 2026-11-17):
+ * the target plan allows fewer logins than the account has active, so the
+ * switch is refused with nothing changed. The counts follow the X1 quantity
+ * PATCH's `members_exceed_quantity` (`{ activeMembers, quantity }`, Rello
+ * src/lib/billing/addon-quantity.ts:297 @be87ded94): `activeMembers` the
+ * active logins now, `targetLimit` what the target plan allows. Exact: no other
+ * field, so a count can never arrive under another name.
+ */
+export const membersExceedTargetErrorSchema = z
+  .object({
+    error: z.literal("members_exceed_target"),
+    activeMembers: z.number().int().nonnegative(),
+    targetLimit: z.number().int().nonnegative(),
+    /** For a person, as on every other plan-switch refusal. */
+    message: z.string().optional(),
+  })
+  .strict();
+export type MembersExceedTargetError = z.infer<typeof membersExceedTargetErrorSchema>;
+
 export type PlanSwitchError =
   | PreviewStaleError
   | { error: "switch_in_progress"; operationId: string }
-  | { error: Exclude<PlanSwitchErrorCode, "preview_stale" | "switch_in_progress">; message?: string };
+  | MembersExceedTargetError
+  | { error: Exclude<PlanSwitchErrorCode, "preview_stale" | "switch_in_progress" | "members_exceed_target">; message?: string };
+
+// ─── Plan-switch answer schemas (v2.37.0, PFP O-6) ──────────────────────────
+//
+// v2.36.0 shipped the answers above as types only. These parse them at
+// runtime and are checked against the interfaces with `satisfies`. No Rello
+// route serves plan-switch yet (G-10R builds it to this contract), so the
+// tests' fixtures are hand-written from the contract and say so.
+// Not strict: a field Rello adds later is dropped, never a refusal.
+
+const isoInstant = z.string().min(1);
+const minorAmount = z.number().int();
+
+export const planSwitchPreviewLineSchema = z.object({
+  description: z.string(),
+  amount: minorAmount,
+  currency: z.string().min(1),
+  period: z.object({ start: isoInstant, end: isoInstant }),
+  proration: z.boolean(),
+}) satisfies z.ZodType<PlanSwitchPreviewLine>;
+
+export const planSwitchPreviewSubscriptionSchema = z.object({
+  kind: z.enum(["plan", "addon"]),
+  lines: z.array(planSwitchPreviewLineSchema),
+  total: minorAmount,
+}) satisfies z.ZodType<PlanSwitchPreviewSubscription>;
+
+/** 200 of GET /api/v1/billing/plan-switch/preview. */
+export const planSwitchPreviewResponseSchema = z.object({
+  previewId: z.string().min(1),
+  expiresAt: isoInstant,
+  prorationDate: isoInstant,
+  requiresConfirmation: z.boolean(),
+  subscriptions: z.array(planSwitchPreviewSubscriptionSchema),
+  planChange: z.object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    fromInterval: intervalField,
+    toInterval: intervalField,
+  }),
+  chargeChange: z.object({ carriedCheckYourRateSeat: z.boolean(), refiRadarDrops: z.boolean() }),
+}) satisfies z.ZodType<PlanSwitchPreviewResponse>;
+
+export const planSwitchStepSchema = z.object({
+  index: z.number().int().nonnegative(),
+  kind: z.string().min(1),
+  state: z.enum(["PENDING", "IN_FLIGHT", "DONE"]),
+}) satisfies z.ZodType<PlanSwitchStep>;
+
+/** 200 of POST /api/v1/billing/plan-switch: finished inside the request. */
+export const planSwitchAppliedResponseSchema = z.object({
+  operationId: z.string().min(1),
+  status: z.literal("APPLIED"),
+  steps: z.array(planSwitchStepSchema),
+  planSlug: z.string().min(1),
+  interval: intervalField,
+  invoiceIds: z.array(z.string()),
+}) satisfies z.ZodType<PlanSwitchAppliedResponse>;
+
+/** 202 of POST /api/v1/billing/plan-switch: still running; poll the operation. */
+export const planSwitchOpenResponseSchema = z.object({
+  operationId: z.string().min(1),
+  status: z.literal("OPEN"),
+}) satisfies z.ZodType<PlanSwitchOpenResponse>;
+
+export const planSwitchResponseSchema = z.discriminatedUnion("status", [
+  planSwitchAppliedResponseSchema,
+  planSwitchOpenResponseSchema,
+]) satisfies z.ZodType<PlanSwitchResponse>;
+
+/** 200 of GET /api/v1/billing/plan-switch/[operationId]. */
+export const planSwitchOperationResponseSchema = z.object({
+  operationId: z.string().min(1),
+  status: z.enum(["OPEN", "APPLIED", "FAILED", "COMPENSATED"]),
+  steps: z.array(planSwitchStepSchema),
+  previewId: z.string().min(1).nullable(),
+  invoiceIds: z.array(z.string()),
+  resolutionNeeded: z.boolean(),
+  unknownSince: isoInstant.nullable(),
+}) satisfies z.ZodType<PlanSwitchOperationResponse>;
+
+/** `409 switch_in_progress`: another switch for this tenant is running; poll it. */
+export const switchInProgressErrorSchema = z.object({
+  error: z.literal("switch_in_progress"),
+  operationId: z.string().min(1),
+});
+export type SwitchInProgressError = z.infer<typeof switchInProgressErrorSchema>;
+
+/**
+ * Any other plan-switch refusal: `{ error: <code>, message? }`. `error` is a
+ * plain string on the wire (like preview_stale's `reason`), so a code Rello
+ * adds later is still an answer; compare it against {@link PLAN_SWITCH_ERROR_CODES}.
+ * Extra fields are kept.
+ */
+export const planSwitchOtherErrorSchema = z
+  .object({ error: z.string().min(1), message: z.string().optional() })
+  .loose();
+export type PlanSwitchOtherError = z.infer<typeof planSwitchOtherErrorSchema>;
+
+/**
+ * Every plan-switch refusal. The exact branches are tried first, so a body
+ * that names `members_exceed_target`, `preview_stale` or `switch_in_progress`
+ * but breaks that branch's shape fails those branches; it can still match the
+ * open branch, so use the guards below (or `error` + the exact schema) to act
+ * on one.
+ */
+export const planSwitchErrorSchema = z.union([
+  membersExceedTargetErrorSchema,
+  previewStaleErrorSchema,
+  switchInProgressErrorSchema,
+  planSwitchOtherErrorSchema,
+]);
+
+export function isMembersExceedTargetError(e: unknown): e is MembersExceedTargetError {
+  return membersExceedTargetErrorSchema.safeParse(e).success;
+}
 
 // ─── Add-on quantity (R1's PATCH, generalized by X1) ────────────────────────
 

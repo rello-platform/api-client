@@ -2168,6 +2168,84 @@ var ROSTER_ERROR_CODES = [
   "internal_error"
   // 500: nothing was saved; try again
 ];
+var loginlessAgentCreateResponseSchema = z2.object({
+  relloAgentId: z2.string().min(1),
+  slug: z2.string().min(1),
+  email: z2.string().min(1),
+  replayed: z2.boolean()
+});
+var loginlessAgentRemoveResponseSchema = z2.object({
+  relloAgentId: z2.string().min(1),
+  status: z2.literal("INACTIVE"),
+  alreadyInactive: z2.boolean()
+});
+var teamMemberCreateResponseSchema = z2.object({
+  userId: z2.string().min(1),
+  relloAgentId: z2.string().min(1),
+  email: z2.string().min(1),
+  signInEmail: z2.literal("queued"),
+  replayed: z2.boolean()
+});
+var teamMemberSignInLinkResponseSchema = z2.object({
+  userId: z2.string().min(1),
+  signInEmail: z2.literal("queued"),
+  replayed: z2.boolean()
+});
+var teamMemberRemoveResponseSchema = z2.object({
+  userId: z2.string().min(1),
+  isActive: z2.literal(false),
+  alreadyInactive: z2.boolean()
+});
+var rosterCount = z2.number().int().nonnegative();
+var teamLoginRosterMemberSchema = z2.object({
+  userId: z2.string().min(1),
+  relloAgentId: z2.string().min(1).nullable(),
+  email: z2.string(),
+  firstName: z2.string(),
+  lastName: z2.string(),
+  role: z2.string(),
+  isOwner: z2.boolean()
+});
+var teamLoginRosterResponseSchema = z2.object({
+  included: rosterCount.nullable(),
+  purchased: rosterCount,
+  capacity: rosterCount.nullable(),
+  members: rosterCount,
+  overBy: rosterCount,
+  addOnCatalogKey: z2.literal("pfp-extra-team-login"),
+  people: z2.array(teamLoginRosterMemberSchema)
+}).refine((r) => r.included === null === (r.capacity === null), {
+  message: "included and capacity are null together"
+});
+var rosterErrorSchema = z2.object({
+  code: z2.string().min(1),
+  /** For a person. */
+  error: z2.string()
+}).loose();
+function isRosterErrorCode(code) {
+  return typeof code === "string" && ROSTER_ERROR_CODES.includes(code);
+}
+var signatureQuantityNeededSchema = z2.object({
+  code: z2.literal("signature_quantity_needed"),
+  error: z2.string(),
+  purchased: rosterCount,
+  extras: rosterCount,
+  addOnCatalogKey: z2.literal("pfp-extra-signature")
+});
+var alreadyMemberSchema = z2.object({
+  code: z2.literal("already_member"),
+  error: z2.string(),
+  userId: z2.string().min(1),
+  isActive: z2.boolean()
+});
+var loginQuantityNeededSchema = z2.object({
+  code: z2.literal("login_quantity_needed"),
+  error: z2.string(),
+  included: rosterCount,
+  purchased: rosterCount,
+  members: rosterCount,
+  addOnCatalogKey: z2.literal("pfp-extra-team-login")
+});
 
 // src/types/sms-setup.ts
 import { z as z3 } from "zod";
@@ -2410,6 +2488,85 @@ var previewStaleErrorSchema = z4.object({
   error: z4.literal("preview_stale"),
   reason: z4.string().optional()
 });
+var membersExceedTargetErrorSchema = z4.object({
+  error: z4.literal("members_exceed_target"),
+  activeMembers: z4.number().int().nonnegative(),
+  targetLimit: z4.number().int().nonnegative(),
+  /** For a person, as on every other plan-switch refusal. */
+  message: z4.string().optional()
+}).strict();
+var isoInstant = z4.string().min(1);
+var minorAmount = z4.number().int();
+var planSwitchPreviewLineSchema = z4.object({
+  description: z4.string(),
+  amount: minorAmount,
+  currency: z4.string().min(1),
+  period: z4.object({ start: isoInstant, end: isoInstant }),
+  proration: z4.boolean()
+});
+var planSwitchPreviewSubscriptionSchema = z4.object({
+  kind: z4.enum(["plan", "addon"]),
+  lines: z4.array(planSwitchPreviewLineSchema),
+  total: minorAmount
+});
+var planSwitchPreviewResponseSchema = z4.object({
+  previewId: z4.string().min(1),
+  expiresAt: isoInstant,
+  prorationDate: isoInstant,
+  requiresConfirmation: z4.boolean(),
+  subscriptions: z4.array(planSwitchPreviewSubscriptionSchema),
+  planChange: z4.object({
+    from: z4.string().min(1),
+    to: z4.string().min(1),
+    fromInterval: intervalField,
+    toInterval: intervalField
+  }),
+  chargeChange: z4.object({ carriedCheckYourRateSeat: z4.boolean(), refiRadarDrops: z4.boolean() })
+});
+var planSwitchStepSchema = z4.object({
+  index: z4.number().int().nonnegative(),
+  kind: z4.string().min(1),
+  state: z4.enum(["PENDING", "IN_FLIGHT", "DONE"])
+});
+var planSwitchAppliedResponseSchema = z4.object({
+  operationId: z4.string().min(1),
+  status: z4.literal("APPLIED"),
+  steps: z4.array(planSwitchStepSchema),
+  planSlug: z4.string().min(1),
+  interval: intervalField,
+  invoiceIds: z4.array(z4.string())
+});
+var planSwitchOpenResponseSchema = z4.object({
+  operationId: z4.string().min(1),
+  status: z4.literal("OPEN")
+});
+var planSwitchResponseSchema = z4.discriminatedUnion("status", [
+  planSwitchAppliedResponseSchema,
+  planSwitchOpenResponseSchema
+]);
+var planSwitchOperationResponseSchema = z4.object({
+  operationId: z4.string().min(1),
+  status: z4.enum(["OPEN", "APPLIED", "FAILED", "COMPENSATED"]),
+  steps: z4.array(planSwitchStepSchema),
+  previewId: z4.string().min(1).nullable(),
+  invoiceIds: z4.array(z4.string()),
+  resolutionNeeded: z4.boolean(),
+  unknownSince: isoInstant.nullable()
+});
+var switchInProgressErrorSchema = z4.object({
+  error: z4.literal("switch_in_progress"),
+  operationId: z4.string().min(1)
+});
+var planSwitchOtherErrorSchema = z4.object({ error: z4.string().min(1), message: z4.string().optional() }).loose();
+var planSwitchErrorSchema = z4.union([
+  membersExceedTargetErrorSchema,
+  previewStaleErrorSchema,
+  switchInProgressErrorSchema,
+  planSwitchOtherErrorSchema
+]);
+function isMembersExceedTargetError(e) {
+  return membersExceedTargetErrorSchema.safeParse(e).success;
+}
 var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
 var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
 var addOnQuantityRequestSchema = z4.object({
@@ -2482,6 +2639,27 @@ function isMembersExceedQuantityError(e) {
   return membersExceedQuantityErrorSchema.safeParse(e).success;
 }
 
+// src/types/v1-billing-reads.ts
+import { z as z5 } from "zod";
+var V1_TENANT_MATCH_ERRORS = Object.freeze({
+  /** A tenant-scoped key sent an X-Tenant-Id naming another tenant. Nothing was read for either. */
+  tenantHeaderMismatch: "Forbidden \u2014 tenant header does not match credential",
+  /** The key's app is not one these routes serve (pathfinder-pro today). */
+  callerAppNotAllowed: "Forbidden \u2014 caller app not allowed"
+});
+function appNotEnabledForTenantError(appSlug) {
+  return `Forbidden \u2014 app '${appSlug}' is not enabled for tenant`;
+}
+var v1TenantMatchErrorSchema = z5.object({ error: z5.string().min(1) });
+var planGrantsReadResponseSchema = z5.object({
+  rev: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  grants: z5.array(z5.string().min(1)),
+  planSlug: z5.string().min(1),
+  cyr: tenantCyrStateSchema.nullable()
+});
+var PLAN_GRANTS_READ_ERROR_CODES = ["no_plan_grants", "plan_grants_unavailable"];
+var planGrantsReadErrorSchema = z5.object({ error: z5.enum(PLAN_GRANTS_READ_ERROR_CODES) });
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2496,6 +2674,7 @@ export {
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource,
   AuthResource,
+  PLAN_GRANTS_READ_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS,
@@ -2510,11 +2689,14 @@ export {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  V1_TENANT_MATCH_ERRORS,
   addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,
   addOnQuantityResponseSchema,
   agentProvisionPayloadSchema,
+  alreadyMemberSchema,
+  appNotEnabledForTenantError,
   businessIndustry,
   businessType,
   callerHasPermission,
@@ -2541,37 +2723,64 @@ export {
   internalError,
   isExtraMlosExceedQuantityError,
   isMembersExceedQuantityError,
+  isMembersExceedTargetError,
+  isRosterErrorCode,
+  loginQuantityNeededSchema,
   loginlessAgentCreateRequestSchema,
+  loginlessAgentCreateResponseSchema,
   loginlessAgentRemoveRequestSchema,
+  loginlessAgentRemoveResponseSchema,
   membersExceedQuantityErrorSchema,
+  membersExceedTargetErrorSchema,
   oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,
+  planGrantsReadErrorSchema,
+  planGrantsReadResponseSchema,
+  planSwitchAppliedResponseSchema,
+  planSwitchErrorSchema,
+  planSwitchOpenResponseSchema,
+  planSwitchOperationResponseSchema,
+  planSwitchOtherErrorSchema,
+  planSwitchPreviewLineSchema,
   planSwitchPreviewQuerySchema,
+  planSwitchPreviewResponseSchema,
+  planSwitchPreviewSubscriptionSchema,
   planSwitchRequestSchema,
+  planSwitchResponseSchema,
+  planSwitchStepSchema,
   previewStaleErrorSchema,
   provisionedAgentSchema,
   quoteVersion,
   registrationConflict,
   resetImplicitApiKeyUses,
+  rosterErrorSchema,
   runRelloPermissionSelfCheck,
   setupChargeChangedEvent,
   setupChargeEnvelope,
   setupChargeRequest,
   setupChargeStatus,
+  signatureQuantityNeededSchema,
   smsOtpRequest,
   smsRegistrationChangedEvent,
   smsRegistrationEnvelope,
   smsRegistrationRequest,
   smsRegistrationStatus,
+  switchInProgressErrorSchema,
+  teamLoginRosterMemberSchema,
   teamLoginRosterQuerySchema,
+  teamLoginRosterResponseSchema,
   teamMemberCreateRequestSchema,
+  teamMemberCreateResponseSchema,
   teamMemberRemoveRequestSchema,
+  teamMemberRemoveResponseSchema,
   teamMemberSignInLinkRequestSchema,
+  teamMemberSignInLinkResponseSchema,
   tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,
   tenantPlanGrantsSchema,
-  tenantProvisioningPayloadSchema
+  tenantProvisioningPayloadSchema,
+  v1TenantMatchErrorSchema
 };
 //# sourceMappingURL=index.js.map

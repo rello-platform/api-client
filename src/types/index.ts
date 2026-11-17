@@ -167,6 +167,18 @@ export {
   teamMemberRemoveRequestSchema,
   teamLoginRosterQuerySchema,
   ROSTER_ERROR_CODES,
+  loginlessAgentCreateResponseSchema,
+  loginlessAgentRemoveResponseSchema,
+  teamMemberCreateResponseSchema,
+  teamMemberSignInLinkResponseSchema,
+  teamMemberRemoveResponseSchema,
+  teamLoginRosterMemberSchema,
+  teamLoginRosterResponseSchema,
+  rosterErrorSchema,
+  isRosterErrorCode,
+  signatureQuantityNeededSchema,
+  alreadyMemberSchema,
+  loginQuantityNeededSchema,
 } from "./roster.js";
 export type {
   LoginlessAgentCreateRequest,
@@ -187,6 +199,7 @@ export type {
   SignatureQuantityNeeded,
   AlreadyMember,
   LoginQuantityNeeded,
+  RosterErrorParsed,
 } from "./roster.js";
 
 // PFP Gateway G-SETUP + G-A2P (setup charge, texting registration)
@@ -252,6 +265,19 @@ export {
   addOnQuantityErrorSchema,
   isExtraMlosExceedQuantityError,
   isMembersExceedQuantityError,
+  membersExceedTargetErrorSchema,
+  planSwitchPreviewLineSchema,
+  planSwitchPreviewSubscriptionSchema,
+  planSwitchPreviewResponseSchema,
+  planSwitchStepSchema,
+  planSwitchAppliedResponseSchema,
+  planSwitchOpenResponseSchema,
+  planSwitchResponseSchema,
+  planSwitchOperationResponseSchema,
+  switchInProgressErrorSchema,
+  planSwitchOtherErrorSchema,
+  planSwitchErrorSchema,
+  isMembersExceedTargetError,
 } from "./billing-switch.js";
 export type {
   PlanSwitchInterval,
@@ -280,4 +306,23 @@ export type {
   ExtraMlosExceedQuantityError,
   MembersExceedQuantityError,
   AddOnQuantityOtherError,
+  MembersExceedTargetError,
+  SwitchInProgressError,
+  PlanSwitchOtherError,
 } from "./billing-switch.js";
+
+// PFP Gateway P-1: tenant-bound v1 billing reads (plan grants)
+export {
+  V1_TENANT_MATCH_ERRORS,
+  appNotEnabledForTenantError,
+  v1TenantMatchErrorSchema,
+  planGrantsReadResponseSchema,
+  PLAN_GRANTS_READ_ERROR_CODES,
+  planGrantsReadErrorSchema,
+} from "./v1-billing-reads.js";
+export type {
+  V1TenantMatchError,
+  PlanGrantsReadResponse,
+  PlanGrantsReadErrorCode,
+  PlanGrantsReadError,
+} from "./v1-billing-reads.js";
