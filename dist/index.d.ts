@@ -4261,6 +4261,183 @@ declare const ADD_ON_START_ERROR_CODES: readonly ["not_a_check_your_rate_addon",
 type AddOnStartErrorCode = (typeof ADD_ON_START_ERROR_CODES)[number];
 
 /**
+ * PFP Gateway P-2: the embed token and F2 (tenant app access). One contract for
+ * Rello's v1 routes and their two callers, PathfinderPro and Home Scout.
+ * Map MAP-P2-EMBED-TOKEN-F2-261118.md
+ * (sha256 114f1378ecda0a07cf5c5ba402c9481ffd8b99ea5453465e16746d7f046d7768),
+ * Platform KA prompt 1306.
+ *
+ * Rello mints a short-lived opaque token (`rpe_…`) so a Home Scout page can open
+ * inside PathfinderPro. Home Scout never trusts the token itself: it asks Rello.
+ * F2 lets Home Scout ask Rello whether PathfinderPro may act for a tenant.
+ *
+ *   POST /api/v1/embed-tokens                          PathfinderPro → Rello   (201 mint)
+ *   POST /api/v1/embed-tokens/verify                   Home Scout → Rello      (200 verdict)
+ *   GET  /api/v1/platform/tenant-app-access?tenantId=  Home Scout → Rello      (200 F2)
+ *
+ * Auth on every route: `Authorization: Bearer <ApiKey>` (Rello's ApiKey table,
+ * targetApp RELLO). The mint's tenant comes from the key, never from the body.
+ *
+ * Refusals are `{ error: <code> }` with a code from {@link EMBED_TOKEN_ERRORS}.
+ *
+ * Module-level helpers carry an `embedToken` prefix so tsup renames nothing else
+ * in the bundle.
+ */
+
+/** The Home Scout page PathfinderPro wants to embed. */
+declare const EMBED_SURFACES: readonly ["identity", "rate-widget"];
+type EmbedSurface = (typeof EMBED_SURFACES)[number];
+/** What a token lets Home Scout show. Exactly one per surface, see {@link EMBED_SURFACE_SCOPE}. */
+declare const EMBED_TOKEN_SCOPES: readonly ["hs:identity-editor", "hs:rate-widget"];
+type EmbedTokenScope = (typeof EMBED_TOKEN_SCOPES)[number];
+/** The scope Rello stamps on a token minted for each surface. */
+declare const EMBED_SURFACE_SCOPE: Readonly<Record<EmbedSurface, EmbedTokenScope>>;
+/** Every token is minted for Home Scout and for nothing else. */
+declare const EMBED_TOKEN_AUDIENCE: "home-scout";
+/** Every token Rello mints starts with this prefix. */
+declare const EMBED_TOKEN_PREFIX: "rpe_";
+/** Body of `POST /api/v1/embed-tokens` (PathfinderPro → Rello). Strict: the tenant comes from the key. */
+declare const embedTokenMintRequestSchema: z.ZodObject<{
+    agentId: z.ZodString;
+    surface: z.ZodEnum<{
+        identity: "identity";
+        "rate-widget": "rate-widget";
+    }>;
+}, z.core.$strict>;
+type EmbedTokenMintRequest = z.infer<typeof embedTokenMintRequestSchema>;
+/**
+ * 201 of the mint. `token` is opaque: a consumer passes it on and never reads
+ * meaning into it beyond the `rpe_` prefix. `scope` is
+ * `EMBED_SURFACE_SCOPE[request.surface]`.
+ */
+declare const embedTokenMintResponseSchema: z.ZodObject<{
+    token: z.ZodString;
+    expiresAt: z.ZodISODateTime;
+    audience: z.ZodLiteral<"home-scout">;
+    scope: z.ZodEnum<{
+        "hs:identity-editor": "hs:identity-editor";
+        "hs:rate-widget": "hs:rate-widget";
+    }>;
+    tenantId: z.ZodString;
+    agentId: z.ZodString;
+}, z.core.$strict>;
+type EmbedTokenMintResponse = z.infer<typeof embedTokenMintResponseSchema>;
+/** Body of `POST /api/v1/embed-tokens/verify` (Home Scout → Rello). */
+declare const embedTokenVerifyRequestSchema: z.ZodObject<{
+    token: z.ZodString;
+}, z.core.$strict>;
+type EmbedTokenVerifyRequest = z.infer<typeof embedTokenVerifyRequestSchema>;
+/** Why Rello says a token is not valid. Each one is a definite answer from Rello. */
+declare const EMBED_TOKEN_INVALID_REASONS: readonly ["expired", "revoked", "unknown_token"];
+type EmbedTokenInvalidReason = (typeof EMBED_TOKEN_INVALID_REASONS)[number];
+declare const embedTokenVerifyValidSchema: z.ZodObject<{
+    valid: z.ZodLiteral<true>;
+    tenantId: z.ZodString;
+    agentId: z.ZodString;
+    scope: z.ZodEnum<{
+        "hs:identity-editor": "hs:identity-editor";
+        "hs:rate-widget": "hs:rate-widget";
+    }>;
+    expiresAt: z.ZodISODateTime;
+}, z.core.$strict>;
+type EmbedTokenVerifyValid = z.infer<typeof embedTokenVerifyValidSchema>;
+declare const embedTokenVerifyInvalidSchema: z.ZodObject<{
+    valid: z.ZodLiteral<false>;
+    reason: z.ZodEnum<{
+        expired: "expired";
+        revoked: "revoked";
+        unknown_token: "unknown_token";
+    }>;
+}, z.core.$strict>;
+type EmbedTokenVerifyInvalid = z.infer<typeof embedTokenVerifyInvalidSchema>;
+/**
+ * 200 of the verify, a union on `valid`.
+ *
+ * ⚑ UNKNOWN IS NOT INVALID. Rello answers 503 `embed_token_unavailable` (no body
+ * schema) when it cannot tell. A consumer MUST treat a 503, a timeout, a network
+ * error, any other non-200, or a 200 body this schema refuses as UNKNOWN: never
+ * as `valid: false` (that would tell the MLO a good token was revoked) and never
+ * as valid. Only a body this schema accepts is a verdict.
+ */
+declare const embedTokenVerifyResponseSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    valid: z.ZodLiteral<true>;
+    tenantId: z.ZodString;
+    agentId: z.ZodString;
+    scope: z.ZodEnum<{
+        "hs:identity-editor": "hs:identity-editor";
+        "hs:rate-widget": "hs:rate-widget";
+    }>;
+    expiresAt: z.ZodISODateTime;
+}, z.core.$strict>, z.ZodObject<{
+    valid: z.ZodLiteral<false>;
+    reason: z.ZodEnum<{
+        expired: "expired";
+        revoked: "revoked";
+        unknown_token: "unknown_token";
+    }>;
+}, z.core.$strict>], "valid">;
+type EmbedTokenVerifyResponse = z.infer<typeof embedTokenVerifyResponseSchema>;
+/**
+ * 200 of `GET /api/v1/platform/tenant-app-access?tenantId=` (Home Scout → Rello):
+ * whether PathfinderPro may act for this tenant. A 503
+ * `tenant_app_access_unavailable` is UNKNOWN, never `servable: false`.
+ */
+declare const tenantAppAccessResponseSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    servable: z.ZodBoolean;
+}, z.core.$strict>;
+type TenantAppAccessResponse = z.infer<typeof tenantAppAccessResponseSchema>;
+/**
+ * The `error` codes these routes answer in a `{ error: <code> }` body (beside
+ * the shared v1 auth refusals, below). Statuses in {@link EMBED_TOKEN_ERROR_STATUS}.
+ *
+ *  400 UNKNOWN_FIELD                  a body (or F2 query) key the route does not
+ *                                     take; the body also carries `field`, the key
+ *                                     ({ error: "UNKNOWN_FIELD", field: "tenantId" })
+ *  400 invalid_body                   a body that is not JSON, not an object, or has
+ *                                     a bad value; the body also carries `message`
+ *                                     ({ error: "invalid_body", message: "..." })
+ *  404 agent_not_in_tenant            the mint's agentId is not this tenant's
+ *  409 agent_inactive                 the agent exists but is not active
+ *  409 home_scout_not_enabled         the tenant has no Home Scout
+ *  409 tenant_not_servable            PathfinderPro may not act for this tenant
+ *  503 embed_token_unavailable        mint or verify could not tell: UNKNOWN
+ *  503 tenant_app_access_unavailable  F2 could not tell: UNKNOWN (a failed ApiKey
+ *                                     read in the auth chain answers these 503s too)
+ *
+ * NOT in this map — the shared v1 auth refusals, answered before the route
+ * reads anything (every one with Cache-Control: no-store):
+ *  401 { error: "Unauthorized" }                     no valid ApiKey
+ *  403 { error: "Forbidden" }                        the key lacks the route's permission
+ *  403 { error: "Forbidden — caller app not allowed" }
+ *                                                    mint: not pathfinder-pro;
+ *                                                    verify / F2: not home-scout
+ *  403 { error: "Forbidden — tenant header does not match credential" }
+ *  403 { error: "Forbidden — app 'pathfinder-pro' is not enabled for tenant" }
+ *                                                    mint only (the tenant binding)
+ *  429 per-app rate limit, with Retry-After          mint only (requireV1Auth)
+ */
+declare const EMBED_TOKEN_ERRORS: Readonly<{
+    readonly UNKNOWN_FIELD: "UNKNOWN_FIELD";
+    readonly INVALID_BODY: "invalid_body";
+    readonly AGENT_NOT_IN_TENANT: "agent_not_in_tenant";
+    readonly AGENT_INACTIVE: "agent_inactive";
+    readonly HOME_SCOUT_NOT_ENABLED: "home_scout_not_enabled";
+    readonly TENANT_NOT_SERVABLE: "tenant_not_servable";
+    readonly EMBED_TOKEN_UNAVAILABLE: "embed_token_unavailable";
+    readonly TENANT_APP_ACCESS_UNAVAILABLE: "tenant_app_access_unavailable";
+}>;
+type EmbedTokenErrorCode = (typeof EMBED_TOKEN_ERRORS)[keyof typeof EMBED_TOKEN_ERRORS];
+/** The HTTP status Rello answers with each {@link EMBED_TOKEN_ERRORS} code. */
+declare const EMBED_TOKEN_ERROR_STATUS: Readonly<Record<EmbedTokenErrorCode, 400 | 404 | 409 | 503>>;
+/** Home Scout asks the PFP host for a fresh token before the current one expires. */
+declare const EMBED_TOKEN_REFRESH_MESSAGE: "pfp-embed:token-refresh";
+/** The PFP host hands Home Scout a freshly minted token. */
+declare const EMBED_TOKEN_MESSAGE: "pfp-embed:token";
+/** The existing PFP message: the embedded session has expired. */
+declare const EMBED_SESSION_EXPIRED_MESSAGE: "pfp-embed:session-expired";
+
+/**
  * implicit-apikey-telemetry — make the implicit-RELLO_API_KEY fallback COUNTABLE.
  *
  * WHY A WARNING ALONE IS NOT ENOUGH
@@ -4334,4 +4511,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, ADD_ONS_READ_ERROR_CODES, ADD_ON_START_ERROR_CODES, ADD_ON_START_IDEMPOTENCY_HEADER, type AddOnOneTimePrice, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddOnStartError, type AddOnStartErrorCode, type AddOnStartRequest, type AddOnStartResponse, type AddOnUnitPrice, type AddOnsReadError, type AddOnsReadErrorCode, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, type EffectiveSettings, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MembersExceedTargetError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_GRANTS_READ_ERROR_CODES, PLAN_SWITCH_DEDICATED_ERROR_CODES, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanGrantsReadError, type PlanGrantsReadErrorCode, type PlanGrantsReadResponse, type PlanSwitchAppliedResponse, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchOtherError, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type RosterErrorParsed, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type SwitchInProgressError, TENANT_ADD_ON_STATUSES, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type V1AddOnRead, type V1AddOnTenantSubscription, type V1AddOnsReadResponse, type V1TenantMatchError, V1_TENANT_MATCH_ERRORS, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnOneTimePriceSchema, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, addOnStartErrorSchema, addOnStartRequestSchema, addOnStartResponseSchema, addOnUnitPriceSchema, addOnsReadErrorSchema, agentProvisionPayloadSchema, alreadyMemberSchema, appNotEnabledForTenantError, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, isMembersExceedTargetError, isRosterErrorCode, loginQuantityNeededSchema, loginlessAgentCreateRequestSchema, loginlessAgentCreateResponseSchema, loginlessAgentRemoveRequestSchema, loginlessAgentRemoveResponseSchema, membersExceedQuantityErrorSchema, membersExceedTargetErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planGrantsReadErrorSchema, planGrantsReadResponseSchema, planSwitchAppliedResponseSchema, planSwitchErrorSchema, planSwitchOpenResponseSchema, planSwitchOperationResponseSchema, planSwitchOtherErrorSchema, planSwitchPreviewLineSchema, planSwitchPreviewQuerySchema, planSwitchPreviewResponseSchema, planSwitchPreviewSubscriptionSchema, planSwitchRequestSchema, planSwitchResponseSchema, planSwitchStepSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, rosterErrorSchema, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, signatureQuantityNeededSchema, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, switchInProgressErrorSchema, teamLoginRosterMemberSchema, teamLoginRosterQuerySchema, teamLoginRosterResponseSchema, teamMemberCreateRequestSchema, teamMemberCreateResponseSchema, teamMemberRemoveRequestSchema, teamMemberRemoveResponseSchema, teamMemberSignInLinkRequestSchema, teamMemberSignInLinkResponseSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema, v1AddOnReadSchema, v1AddOnTenantSubscriptionSchema, v1AddOnsReadResponseSchema, v1TenantMatchErrorSchema };
+export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, ADD_ONS_READ_ERROR_CODES, ADD_ON_START_ERROR_CODES, ADD_ON_START_IDEMPOTENCY_HEADER, type AddOnOneTimePrice, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddOnStartError, type AddOnStartErrorCode, type AddOnStartRequest, type AddOnStartResponse, type AddOnUnitPrice, type AddOnsReadError, type AddOnsReadErrorCode, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, EMBED_SESSION_EXPIRED_MESSAGE, EMBED_SURFACES, EMBED_SURFACE_SCOPE, EMBED_TOKEN_AUDIENCE, EMBED_TOKEN_ERRORS, EMBED_TOKEN_ERROR_STATUS, EMBED_TOKEN_INVALID_REASONS, EMBED_TOKEN_MESSAGE, EMBED_TOKEN_PREFIX, EMBED_TOKEN_REFRESH_MESSAGE, EMBED_TOKEN_SCOPES, type EffectiveSettings, type EmbedSurface, type EmbedTokenErrorCode, type EmbedTokenInvalidReason, type EmbedTokenMintRequest, type EmbedTokenMintResponse, type EmbedTokenScope, type EmbedTokenVerifyInvalid, type EmbedTokenVerifyRequest, type EmbedTokenVerifyResponse, type EmbedTokenVerifyValid, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MembersExceedTargetError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_GRANTS_READ_ERROR_CODES, PLAN_SWITCH_DEDICATED_ERROR_CODES, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanGrantsReadError, type PlanGrantsReadErrorCode, type PlanGrantsReadResponse, type PlanSwitchAppliedResponse, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchOtherError, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type RosterErrorParsed, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type SwitchInProgressError, TENANT_ADD_ON_STATUSES, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantAppAccessResponse, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type V1AddOnRead, type V1AddOnTenantSubscription, type V1AddOnsReadResponse, type V1TenantMatchError, V1_TENANT_MATCH_ERRORS, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnOneTimePriceSchema, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, addOnStartErrorSchema, addOnStartRequestSchema, addOnStartResponseSchema, addOnUnitPriceSchema, addOnsReadErrorSchema, agentProvisionPayloadSchema, alreadyMemberSchema, appNotEnabledForTenantError, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, embedTokenMintRequestSchema, embedTokenMintResponseSchema, embedTokenVerifyInvalidSchema, embedTokenVerifyRequestSchema, embedTokenVerifyResponseSchema, embedTokenVerifyValidSchema, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, isMembersExceedTargetError, isRosterErrorCode, loginQuantityNeededSchema, loginlessAgentCreateRequestSchema, loginlessAgentCreateResponseSchema, loginlessAgentRemoveRequestSchema, loginlessAgentRemoveResponseSchema, membersExceedQuantityErrorSchema, membersExceedTargetErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planGrantsReadErrorSchema, planGrantsReadResponseSchema, planSwitchAppliedResponseSchema, planSwitchErrorSchema, planSwitchOpenResponseSchema, planSwitchOperationResponseSchema, planSwitchOtherErrorSchema, planSwitchPreviewLineSchema, planSwitchPreviewQuerySchema, planSwitchPreviewResponseSchema, planSwitchPreviewSubscriptionSchema, planSwitchRequestSchema, planSwitchResponseSchema, planSwitchStepSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, rosterErrorSchema, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, signatureQuantityNeededSchema, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, switchInProgressErrorSchema, teamLoginRosterMemberSchema, teamLoginRosterQuerySchema, teamLoginRosterResponseSchema, teamMemberCreateRequestSchema, teamMemberCreateResponseSchema, teamMemberRemoveRequestSchema, teamMemberRemoveResponseSchema, teamMemberSignInLinkRequestSchema, teamMemberSignInLinkResponseSchema, tenantAppAccessResponseSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema, v1AddOnReadSchema, v1AddOnTenantSubscriptionSchema, v1AddOnsReadResponseSchema, v1TenantMatchErrorSchema };
