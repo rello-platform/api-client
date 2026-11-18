@@ -40,7 +40,18 @@ next free version when it merges).
     `addOnStartResponseSchema` ({ success: true, data: { tenantAddOnId,
     status, trialEndsAt? } }), `addOnStartErrorSchema` (`.loose()`, so a code's
     fields like `needsPaymentMethod` / `coveredSeats` are kept) and
-    `ADD_ON_START_ERROR_CODES` (R1's ten).
+    `ADD_ON_START_ERROR_CODES` (R1's ten, with `addon_price_not_configured`
+    the 409 for a missing TEAM/DEFAULT price, carrying `family`, `interval`
+    and `addOnId`; see GD-2250 below).
+  - GD-2250 (AUDIT 111, KA 1325): the list named `addon_pricing_not_configured`
+    and omitted `addon_price_not_configured`, the code Rello main sends
+    (`src/lib/billing/cyr-price.ts`, forwarded by `POST /api/v1/billing/add-on`).
+    The list now names `addon_price_not_configured`. `addon_pricing_not_configured`
+    is removed: at Rello origin/main a8cf79a8e (contains b654fdafe) nothing
+    sends it; its only occurrence is a comment in
+    `src/lib/billing/v1/add-on-unit-price.ts`. The list was introduced in this
+    unreleased version, so v2.36.0 callers lose nothing. `code` stays an open
+    string, so a body carrying the old spelling still parses.
 - Zod for the answers v2.36.0 shipped as types only:
   - Roster (`src/types/roster.ts`): the six answers, `rosterErrorSchema`
     (`code` a plain string, `.loose()`), `isRosterErrorCode`, and the three

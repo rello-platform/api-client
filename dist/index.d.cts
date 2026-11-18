@@ -4072,7 +4072,7 @@ type PlanGrantsReadError = z.infer<typeof planGrantsReadErrorSchema>;
  * that holds it. No Stripe call.
  *
  * `null` means UNKNOWN, never $0: Rello holds no Stripe price for that interval
- * (a POST would refuse `addon_pricing_not_configured`) or the amount can't be
+ * (a POST would refuse `addon_price_not_configured`) or the amount can't be
  * read. A determined `0` is a real $0. A ONE_TIME add-on has no per-interval
  * price, so both are null and `type` says why.
  */
@@ -4200,8 +4200,14 @@ declare const addOnStartErrorSchema: z.ZodObject<{
     code: z.ZodOptional<z.ZodString>;
 }, z.core.$loose>;
 type AddOnStartError = z.infer<typeof addOnStartErrorSchema>;
-/** The codes R1's Check Your Rate start answers today, for callers that branch on them. */
-declare const ADD_ON_START_ERROR_CODES: readonly ["not_a_check_your_rate_addon", "payment_method_required", "tenant_not_found", "addon_already_active", "addon_state_unknown", "already_entitled", "engine_required", "trial_already_used", "addon_pricing_not_configured", "stripe_failed"];
+/**
+ * The codes R1's Check Your Rate start answers today, for callers that branch on them.
+ * `addon_price_not_configured` (409) carries `family`, `interval` and `addOnId`, kept by
+ * `.loose()`. The older spelling `addon_pricing_not_configured` is not listed: nothing in
+ * Rello main sends it (AUDIT 111 GD-2250); `code` stays an open string, so a body that
+ * carries it still parses.
+ */
+declare const ADD_ON_START_ERROR_CODES: readonly ["not_a_check_your_rate_addon", "payment_method_required", "tenant_not_found", "addon_already_active", "addon_state_unknown", "already_entitled", "engine_required", "trial_already_used", "addon_price_not_configured", "stripe_failed"];
 type AddOnStartErrorCode = (typeof ADD_ON_START_ERROR_CODES)[number];
 
 /**

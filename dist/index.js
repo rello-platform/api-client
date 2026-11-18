@@ -2717,7 +2717,7 @@ var ADD_ON_START_ERROR_CODES = [
   "already_entitled",
   "engine_required",
   "trial_already_used",
-  "addon_pricing_not_configured",
+  "addon_price_not_configured",
   "stripe_failed"
 ];
 
