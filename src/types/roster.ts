@@ -219,3 +219,125 @@ export interface LoginQuantityNeeded extends RosterError {
   members: number;
   addOnCatalogKey: "pfp-extra-team-login";
 }
+
+// ─── Answer schemas (v2.37.0, PFP O-6) ──────────────────────────────────────
+//
+// v2.36.0 shipped the answers above as TypeScript types only, so a caller
+// could not check at runtime that Rello's body is the shape it relies on. Each
+// schema below parses the body Rello's route serves (src/app/api/provisioning/
+// loginless-agent/** and team-member/** on Rello main) and is checked against
+// its interface with `satisfies`, so the two can never drift apart.
+//
+// Not strict: a field Rello adds later is dropped, never a refusal. Refusals
+// keep extra fields (`.loose()`), e.g. email_in_use's `relloAgentId`.
+
+/** 201 / 200 of POST /api/provisioning/loginless-agent. */
+export const loginlessAgentCreateResponseSchema = z.object({
+  relloAgentId: z.string().min(1),
+  slug: z.string().min(1),
+  email: z.string().min(1),
+  replayed: z.boolean(),
+}) satisfies z.ZodType<LoginlessAgentCreateResponse>;
+
+/** 200 of POST /api/provisioning/loginless-agent/[agentId]/remove. */
+export const loginlessAgentRemoveResponseSchema = z.object({
+  relloAgentId: z.string().min(1),
+  status: z.literal("INACTIVE"),
+  alreadyInactive: z.boolean(),
+}) satisfies z.ZodType<LoginlessAgentRemoveResponse>;
+
+/** 201 / 200 of POST /api/provisioning/team-member. */
+export const teamMemberCreateResponseSchema = z.object({
+  userId: z.string().min(1),
+  relloAgentId: z.string().min(1),
+  email: z.string().min(1),
+  signInEmail: z.literal("queued"),
+  replayed: z.boolean(),
+}) satisfies z.ZodType<TeamMemberCreateResponse>;
+
+/** 202 / 200 of POST /api/provisioning/team-member/[userId]/sign-in-link. */
+export const teamMemberSignInLinkResponseSchema = z.object({
+  userId: z.string().min(1),
+  signInEmail: z.literal("queued"),
+  replayed: z.boolean(),
+}) satisfies z.ZodType<TeamMemberSignInLinkResponse>;
+
+/** 200 of POST /api/provisioning/team-member/[userId]/remove. */
+export const teamMemberRemoveResponseSchema = z.object({
+  userId: z.string().min(1),
+  isActive: z.literal(false),
+  alreadyInactive: z.boolean(),
+}) satisfies z.ZodType<TeamMemberRemoveResponse>;
+
+const rosterCount = z.number().int().nonnegative();
+
+export const teamLoginRosterMemberSchema = z.object({
+  userId: z.string().min(1),
+  relloAgentId: z.string().min(1).nullable(),
+  email: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  role: z.string(),
+  isOwner: z.boolean(),
+}) satisfies z.ZodType<TeamLoginRosterMember>;
+
+/** 200 of GET /api/provisioning/team-member. `included` and `capacity` are null together (the plan sets no limit). */
+export const teamLoginRosterResponseSchema = z
+  .object({
+    included: rosterCount.nullable(),
+    purchased: rosterCount,
+    capacity: rosterCount.nullable(),
+    members: rosterCount,
+    overBy: rosterCount,
+    addOnCatalogKey: z.literal("pfp-extra-team-login"),
+    people: z.array(teamLoginRosterMemberSchema),
+  })
+  .refine((r) => (r.included === null) === (r.capacity === null), {
+    message: "included and capacity are null together",
+  }) satisfies z.ZodType<TeamLoginRosterResponse>;
+
+/**
+ * Every non-2xx roster body: `{ code, error, ...extra }`. `code` is a plain
+ * string on the wire, so a code Rello adds later never makes an older caller
+ * refuse the answer; compare it against {@link ROSTER_ERROR_CODES}
+ * ({@link isRosterErrorCode}). Extra fields are kept.
+ */
+export const rosterErrorSchema = z
+  .object({
+    code: z.string().min(1),
+    /** For a person. */
+    error: z.string(),
+  })
+  .loose();
+export type RosterErrorParsed = z.infer<typeof rosterErrorSchema>;
+
+export function isRosterErrorCode(code: unknown): code is RosterErrorCode {
+  return typeof code === "string" && (ROSTER_ERROR_CODES as readonly string[]).includes(code);
+}
+
+/** 409 signature_quantity_needed, exactly. */
+export const signatureQuantityNeededSchema = z.object({
+  code: z.literal("signature_quantity_needed"),
+  error: z.string(),
+  purchased: rosterCount,
+  extras: rosterCount,
+  addOnCatalogKey: z.literal("pfp-extra-signature"),
+}) satisfies z.ZodType<SignatureQuantityNeeded>;
+
+/** 409 already_member, exactly. */
+export const alreadyMemberSchema = z.object({
+  code: z.literal("already_member"),
+  error: z.string(),
+  userId: z.string().min(1),
+  isActive: z.boolean(),
+}) satisfies z.ZodType<AlreadyMember>;
+
+/** 409 login_quantity_needed, exactly. */
+export const loginQuantityNeededSchema = z.object({
+  code: z.literal("login_quantity_needed"),
+  error: z.string(),
+  included: rosterCount,
+  purchased: rosterCount,
+  members: rosterCount,
+  addOnCatalogKey: z.literal("pfp-extra-team-login"),
+}) satisfies z.ZodType<LoginQuantityNeeded>;

@@ -167,6 +167,18 @@ export {
   teamMemberRemoveRequestSchema,
   teamLoginRosterQuerySchema,
   ROSTER_ERROR_CODES,
+  loginlessAgentCreateResponseSchema,
+  loginlessAgentRemoveResponseSchema,
+  teamMemberCreateResponseSchema,
+  teamMemberSignInLinkResponseSchema,
+  teamMemberRemoveResponseSchema,
+  teamLoginRosterMemberSchema,
+  teamLoginRosterResponseSchema,
+  rosterErrorSchema,
+  isRosterErrorCode,
+  signatureQuantityNeededSchema,
+  alreadyMemberSchema,
+  loginQuantityNeededSchema,
 } from "./roster.js";
 export type {
   LoginlessAgentCreateRequest,
@@ -187,6 +199,7 @@ export type {
   SignatureQuantityNeeded,
   AlreadyMember,
   LoginQuantityNeeded,
+  RosterErrorParsed,
 } from "./roster.js";
 
 // PFP Gateway G-SETUP + G-A2P (setup charge, texting registration)
@@ -252,6 +265,20 @@ export {
   addOnQuantityErrorSchema,
   isExtraMlosExceedQuantityError,
   isMembersExceedQuantityError,
+  membersExceedTargetErrorSchema,
+  planSwitchPreviewLineSchema,
+  planSwitchPreviewSubscriptionSchema,
+  planSwitchPreviewResponseSchema,
+  planSwitchStepSchema,
+  planSwitchAppliedResponseSchema,
+  planSwitchOpenResponseSchema,
+  planSwitchResponseSchema,
+  planSwitchOperationResponseSchema,
+  switchInProgressErrorSchema,
+  planSwitchOtherErrorSchema,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES,
+  planSwitchErrorSchema,
+  isMembersExceedTargetError,
 } from "./billing-switch.js";
 export type {
   PlanSwitchInterval,
@@ -280,4 +307,45 @@ export type {
   ExtraMlosExceedQuantityError,
   MembersExceedQuantityError,
   AddOnQuantityOtherError,
+  MembersExceedTargetError,
+  SwitchInProgressError,
+  PlanSwitchOtherError,
 } from "./billing-switch.js";
+
+// PFP Gateway P-1: tenant-bound v1 billing reads (plan grants)
+export {
+  V1_TENANT_MATCH_ERRORS,
+  appNotEnabledForTenantError,
+  v1TenantMatchErrorSchema,
+  planGrantsReadResponseSchema,
+  PLAN_GRANTS_READ_ERROR_CODES,
+  planGrantsReadErrorSchema,
+  addOnUnitPriceSchema,
+  TENANT_ADD_ON_STATUSES,
+  v1AddOnTenantSubscriptionSchema,
+  v1AddOnReadSchema,
+  v1AddOnsReadResponseSchema,
+  ADD_ONS_READ_ERROR_CODES,
+  addOnsReadErrorSchema,
+  ADD_ON_START_IDEMPOTENCY_HEADER,
+  addOnStartRequestSchema,
+  addOnStartResponseSchema,
+  addOnStartErrorSchema,
+  ADD_ON_START_ERROR_CODES,
+} from "./v1-billing-reads.js";
+export type {
+  V1TenantMatchError,
+  PlanGrantsReadResponse,
+  PlanGrantsReadErrorCode,
+  PlanGrantsReadError,
+  AddOnUnitPrice,
+  V1AddOnTenantSubscription,
+  V1AddOnRead,
+  V1AddOnsReadResponse,
+  AddOnsReadErrorCode,
+  AddOnsReadError,
+  AddOnStartRequest,
+  AddOnStartResponse,
+  AddOnStartError,
+  AddOnStartErrorCode,
+} from "./v1-billing-reads.js";

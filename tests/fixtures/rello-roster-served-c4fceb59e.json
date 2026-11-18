@@ -1,0 +1,245 @@
+{
+  "_source": "Captured from Rello main @c4fceb59e roster pg-tests (src/app/api/provisioning/team-member/route.pg-test.ts, loginless-agent/route.pg-test.ts): every Response body the tests read with .json(), via a Response.prototype.json recorder loaded with NODE_OPTIONS=--import. One example per (status, code, extra fields). Agent 2, KA 1221, 2026-11-17.",
+  "answers": {
+    "error:actor_not_owner:plain": {
+      "status": 403,
+      "body": {
+        "code": "actor_not_owner",
+        "error": "Forbidden \u2014 the acting user is not an owner of this account"
+      }
+    },
+    "error:agent_not_found:plain": {
+      "status": 404,
+      "body": {
+        "code": "agent_not_found",
+        "error": "No loan officer without a login has that id in this account"
+      }
+    },
+    "error:already_member:isActive+userId": {
+      "status": 409,
+      "body": {
+        "code": "already_member",
+        "error": "That email already has a login in this account",
+        "userId": "usr_454dc963-7e20-44fe-8d85-9bafdd9b6fb5",
+        "isActive": true
+      }
+    },
+    "error:app_not_enabled:plain": {
+      "status": 403,
+      "body": {
+        "code": "app_not_enabled",
+        "error": "App is not enabled for the requested tenant"
+      }
+    },
+    "error:cannot_remove_owner:plain": {
+      "status": 409,
+      "body": {
+        "code": "cannot_remove_owner",
+        "error": "An owner's login is not removed here"
+      }
+    },
+    "error:email_in_use:loginless+relloAgentId+status": {
+      "status": 409,
+      "body": {
+        "code": "email_in_use",
+        "error": "A loan officer in this account already has that email",
+        "relloAgentId": "cmwkm22pn0039itq4vhg7dkha",
+        "status": "ACTIVE",
+        "loginless": true
+      }
+    },
+    "error:email_in_use:relloAgentId": {
+      "status": 409,
+      "body": {
+        "code": "email_in_use",
+        "error": "A loan officer in this account already has that email",
+        "relloAgentId": "cmwkm21dy008titnt1h3sg02k"
+      }
+    },
+    "error:email_registered_elsewhere:plain": {
+      "status": 409,
+      "body": {
+        "code": "email_registered_elsewhere",
+        "error": "That email already has a login in another account"
+      }
+    },
+    "error:idempotency_key_reused:plain": {
+      "status": 409,
+      "body": {
+        "code": "idempotency_key_reused",
+        "error": "This requestId was already used with a different body; send a new requestId"
+      }
+    },
+    "error:internal_error:plain": {
+      "status": 500,
+      "body": {
+        "code": "internal_error",
+        "error": "Internal server error \u2014 the login was not saved; try again"
+      }
+    },
+    "error:invalid_body:plain": {
+      "status": 400,
+      "body": {
+        "code": "invalid_body",
+        "error": "Unknown field(s): role. Allowed: tenantId, actingRelloUserId, email, firstName, lastName, requestId"
+      }
+    },
+    "error:key_not_scoped:plain": {
+      "status": 403,
+      "body": {
+        "code": "key_not_scoped",
+        "error": "API key not scoped to this app"
+      }
+    },
+    "error:login_quantity_needed:addOnCatalogKey+included+members+purchased": {
+      "status": 409,
+      "body": {
+        "code": "login_quantity_needed",
+        "error": "This account has 3 login(s) and its plan includes 2 plus 1 extra. Add one more extra login first.",
+        "included": 2,
+        "purchased": 1,
+        "members": 3,
+        "addOnCatalogKey": "pfp-extra-team-login"
+      }
+    },
+    "error:member_not_found:plain": {
+      "status": 404,
+      "body": {
+        "code": "member_not_found",
+        "error": "No team login has that id in this account"
+      }
+    },
+    "error:missing_permission:plain": {
+      "status": 403,
+      "body": {
+        "code": "missing_permission",
+        "error": "Forbidden \u2014 missing team:members:write permission"
+      }
+    },
+    "error:signature_quantity_needed:addOnCatalogKey+extras+purchased": {
+      "status": 409,
+      "body": {
+        "code": "signature_quantity_needed",
+        "error": "This account pays for 1 extra signature(s) and has 1 extra loan officer(s). Add one more extra signature first.",
+        "purchased": 1,
+        "extras": 1,
+        "addOnCatalogKey": "pfp-extra-signature"
+      }
+    },
+    "error:tenant_mismatch:plain": {
+      "status": 403,
+      "body": {
+        "code": "tenant_mismatch",
+        "error": "Forbidden \u2014 tenant mismatch"
+      }
+    },
+    "error:unauthorized:plain": {
+      "status": 401,
+      "body": {
+        "code": "unauthorized",
+        "error": "Missing Authorization: Bearer <ApiKey>"
+      }
+    },
+    "loginlessAgentCreate:200": {
+      "status": 200,
+      "body": {
+        "relloAgentId": "cmwkm22ia000litq4b28qfwwi",
+        "slug": "eli-extra2",
+        "email": "extra-a41152mwkm2291-2@example.test",
+        "replayed": true
+      }
+    },
+    "loginlessAgentCreate:201": {
+      "status": 201,
+      "body": {
+        "relloAgentId": "cmwkm22hm0007itq4uyq4w390",
+        "slug": "eli-extra1",
+        "email": "mixed-a41152mwkm2291@example.test",
+        "replayed": false
+      }
+    },
+    "loginlessAgentRemove:200": {
+      "status": 200,
+      "body": {
+        "relloAgentId": "cmwkm22s7005nitq4umkybeh7",
+        "status": "INACTIVE",
+        "alreadyInactive": false
+      }
+    },
+    "teamLoginRoster:200": {
+      "status": 200,
+      "body": {
+        "included": 2,
+        "purchased": 1,
+        "capacity": 3,
+        "members": 2,
+        "overBy": 0,
+        "addOnCatalogKey": "pfp-extra-team-login",
+        "people": [
+          {
+            "userId": "a41171mwkm1zpz-acct-80-owner",
+            "relloAgentId": null,
+            "email": "a41171mwkm1zpz-acct-80-owner@example.test",
+            "firstName": "Olive",
+            "lastName": "Owner",
+            "role": "MLO_OWNER",
+            "isOwner": true
+          },
+          {
+            "userId": "usr_d6808314-393f-4c9e-bd0c-189941fab339",
+            "relloAgentId": "cmwkm220a00hzitnt4k86rbpr",
+            "email": "tm-a41171mwkm1zpz-81@example.test",
+            "firstName": "Tess",
+            "lastName": "Teammate81",
+            "role": "MLO",
+            "isOwner": false
+          }
+        ]
+      }
+    },
+    "teamMemberCreate:200": {
+      "status": 200,
+      "body": {
+        "userId": "usr_16563bbd-de13-4f3c-8688-d93dc7128a4b",
+        "relloAgentId": "cmwkm21cq007nitntrj6ocuje",
+        "email": "tm-a41171mwkm1zpz-33@example.test",
+        "signInEmail": "queued",
+        "replayed": true
+      }
+    },
+    "teamMemberCreate:201": {
+      "status": 201,
+      "body": {
+        "userId": "usr_45572c58-9a64-4dc6-a956-4158d92543e2",
+        "relloAgentId": "cmwkm20nw0007itntvkjv0fi5",
+        "email": "new-a41171mwkm1zpz@example.test",
+        "signInEmail": "queued",
+        "replayed": false
+      }
+    },
+    "teamMemberRemove:200": {
+      "status": 200,
+      "body": {
+        "userId": "usr_ff4546a2-e9b1-4015-bfc0-38cbe747ddae",
+        "isActive": false,
+        "alreadyInactive": false
+      }
+    },
+    "teamMemberSignInLink:200": {
+      "status": 200,
+      "body": {
+        "userId": "usr_01e649d8-c33f-493d-a7a8-0514edd08ae0",
+        "signInEmail": "queued",
+        "replayed": true
+      }
+    },
+    "teamMemberSignInLink:202": {
+      "status": 202,
+      "body": {
+        "userId": "usr_01e649d8-c33f-493d-a7a8-0514edd08ae0",
+        "signInEmail": "queued",
+        "replayed": false
+      }
+    }
+  }
+}

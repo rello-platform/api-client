@@ -24,8 +24,13 @@ __export(index_exports, {
   ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES: () => ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
   ADDON_QUANTITY_IDEMPOTENCY_HEADER: () => ADDON_QUANTITY_IDEMPOTENCY_HEADER,
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: () => ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
+  ADD_ONS_READ_ERROR_CODES: () => ADD_ONS_READ_ERROR_CODES,
+  ADD_ON_START_ERROR_CODES: () => ADD_ON_START_ERROR_CODES,
+  ADD_ON_START_IDEMPOTENCY_HEADER: () => ADD_ON_START_IDEMPOTENCY_HEADER,
   AdminResource: () => AdminResource,
   AuthResource: () => AuthResource,
+  PLAN_GRANTS_READ_ERROR_CODES: () => PLAN_GRANTS_READ_ERROR_CODES,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES: () => PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES: () => PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS: () => PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS: () => PREVIEW_STALE_REASONS,
@@ -40,11 +45,20 @@ __export(index_exports, {
   RelloUnavailableError: () => RelloUnavailableError,
   RelloValidationError: () => RelloValidationError,
   ServiceClient: () => ServiceClient,
+  TENANT_ADD_ON_STATUSES: () => TENANT_ADD_ON_STATUSES,
+  V1_TENANT_MATCH_ERRORS: () => V1_TENANT_MATCH_ERRORS,
   addOnQuantityErrorSchema: () => addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema: () => addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema: () => addOnQuantityRequestSchema,
   addOnQuantityResponseSchema: () => addOnQuantityResponseSchema,
+  addOnStartErrorSchema: () => addOnStartErrorSchema,
+  addOnStartRequestSchema: () => addOnStartRequestSchema,
+  addOnStartResponseSchema: () => addOnStartResponseSchema,
+  addOnUnitPriceSchema: () => addOnUnitPriceSchema,
+  addOnsReadErrorSchema: () => addOnsReadErrorSchema,
   agentProvisionPayloadSchema: () => agentProvisionPayloadSchema,
+  alreadyMemberSchema: () => alreadyMemberSchema,
+  appNotEnabledForTenantError: () => appNotEnabledForTenantError,
   businessIndustry: () => businessIndustry,
   businessType: () => businessType,
   callerHasPermission: () => callerHasPermission,
@@ -71,38 +85,68 @@ __export(index_exports, {
   internalError: () => internalError,
   isExtraMlosExceedQuantityError: () => isExtraMlosExceedQuantityError,
   isMembersExceedQuantityError: () => isMembersExceedQuantityError,
+  isMembersExceedTargetError: () => isMembersExceedTargetError,
+  isRosterErrorCode: () => isRosterErrorCode,
+  loginQuantityNeededSchema: () => loginQuantityNeededSchema,
   loginlessAgentCreateRequestSchema: () => loginlessAgentCreateRequestSchema,
+  loginlessAgentCreateResponseSchema: () => loginlessAgentCreateResponseSchema,
   loginlessAgentRemoveRequestSchema: () => loginlessAgentRemoveRequestSchema,
+  loginlessAgentRemoveResponseSchema: () => loginlessAgentRemoveResponseSchema,
   membersExceedQuantityErrorSchema: () => membersExceedQuantityErrorSchema,
+  membersExceedTargetErrorSchema: () => membersExceedTargetErrorSchema,
   oneTimeFeeQuote: () => oneTimeFeeQuote,
   parseAgentPayload: () => parseAgentPayload,
   parseTenantPayload: () => parseTenantPayload,
+  planGrantsReadErrorSchema: () => planGrantsReadErrorSchema,
+  planGrantsReadResponseSchema: () => planGrantsReadResponseSchema,
+  planSwitchAppliedResponseSchema: () => planSwitchAppliedResponseSchema,
+  planSwitchErrorSchema: () => planSwitchErrorSchema,
+  planSwitchOpenResponseSchema: () => planSwitchOpenResponseSchema,
+  planSwitchOperationResponseSchema: () => planSwitchOperationResponseSchema,
+  planSwitchOtherErrorSchema: () => planSwitchOtherErrorSchema,
+  planSwitchPreviewLineSchema: () => planSwitchPreviewLineSchema,
   planSwitchPreviewQuerySchema: () => planSwitchPreviewQuerySchema,
+  planSwitchPreviewResponseSchema: () => planSwitchPreviewResponseSchema,
+  planSwitchPreviewSubscriptionSchema: () => planSwitchPreviewSubscriptionSchema,
   planSwitchRequestSchema: () => planSwitchRequestSchema,
+  planSwitchResponseSchema: () => planSwitchResponseSchema,
+  planSwitchStepSchema: () => planSwitchStepSchema,
   previewStaleErrorSchema: () => previewStaleErrorSchema,
   provisionedAgentSchema: () => provisionedAgentSchema,
   quoteVersion: () => quoteVersion,
   registrationConflict: () => registrationConflict,
   resetImplicitApiKeyUses: () => resetImplicitApiKeyUses,
+  rosterErrorSchema: () => rosterErrorSchema,
   runRelloPermissionSelfCheck: () => runRelloPermissionSelfCheck,
   setupChargeChangedEvent: () => setupChargeChangedEvent,
   setupChargeEnvelope: () => setupChargeEnvelope,
   setupChargeRequest: () => setupChargeRequest,
   setupChargeStatus: () => setupChargeStatus,
+  signatureQuantityNeededSchema: () => signatureQuantityNeededSchema,
   smsOtpRequest: () => smsOtpRequest,
   smsRegistrationChangedEvent: () => smsRegistrationChangedEvent,
   smsRegistrationEnvelope: () => smsRegistrationEnvelope,
   smsRegistrationRequest: () => smsRegistrationRequest,
   smsRegistrationStatus: () => smsRegistrationStatus,
+  switchInProgressErrorSchema: () => switchInProgressErrorSchema,
+  teamLoginRosterMemberSchema: () => teamLoginRosterMemberSchema,
   teamLoginRosterQuerySchema: () => teamLoginRosterQuerySchema,
+  teamLoginRosterResponseSchema: () => teamLoginRosterResponseSchema,
   teamMemberCreateRequestSchema: () => teamMemberCreateRequestSchema,
+  teamMemberCreateResponseSchema: () => teamMemberCreateResponseSchema,
   teamMemberRemoveRequestSchema: () => teamMemberRemoveRequestSchema,
+  teamMemberRemoveResponseSchema: () => teamMemberRemoveResponseSchema,
   teamMemberSignInLinkRequestSchema: () => teamMemberSignInLinkRequestSchema,
+  teamMemberSignInLinkResponseSchema: () => teamMemberSignInLinkResponseSchema,
   tenantCyrStateSchema: () => tenantCyrStateSchema,
   tenantDisablePayloadSchema: () => tenantDisablePayloadSchema,
   tenantEnablePayloadSchema: () => tenantEnablePayloadSchema,
   tenantPlanGrantsSchema: () => tenantPlanGrantsSchema,
-  tenantProvisioningPayloadSchema: () => tenantProvisioningPayloadSchema
+  tenantProvisioningPayloadSchema: () => tenantProvisioningPayloadSchema,
+  v1AddOnReadSchema: () => v1AddOnReadSchema,
+  v1AddOnTenantSubscriptionSchema: () => v1AddOnTenantSubscriptionSchema,
+  v1AddOnsReadResponseSchema: () => v1AddOnsReadResponseSchema,
+  v1TenantMatchErrorSchema: () => v1TenantMatchErrorSchema
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -2276,6 +2320,84 @@ var ROSTER_ERROR_CODES = [
   "internal_error"
   // 500: nothing was saved; try again
 ];
+var loginlessAgentCreateResponseSchema = import_zod2.z.object({
+  relloAgentId: import_zod2.z.string().min(1),
+  slug: import_zod2.z.string().min(1),
+  email: import_zod2.z.string().min(1),
+  replayed: import_zod2.z.boolean()
+});
+var loginlessAgentRemoveResponseSchema = import_zod2.z.object({
+  relloAgentId: import_zod2.z.string().min(1),
+  status: import_zod2.z.literal("INACTIVE"),
+  alreadyInactive: import_zod2.z.boolean()
+});
+var teamMemberCreateResponseSchema = import_zod2.z.object({
+  userId: import_zod2.z.string().min(1),
+  relloAgentId: import_zod2.z.string().min(1),
+  email: import_zod2.z.string().min(1),
+  signInEmail: import_zod2.z.literal("queued"),
+  replayed: import_zod2.z.boolean()
+});
+var teamMemberSignInLinkResponseSchema = import_zod2.z.object({
+  userId: import_zod2.z.string().min(1),
+  signInEmail: import_zod2.z.literal("queued"),
+  replayed: import_zod2.z.boolean()
+});
+var teamMemberRemoveResponseSchema = import_zod2.z.object({
+  userId: import_zod2.z.string().min(1),
+  isActive: import_zod2.z.literal(false),
+  alreadyInactive: import_zod2.z.boolean()
+});
+var rosterCount = import_zod2.z.number().int().nonnegative();
+var teamLoginRosterMemberSchema = import_zod2.z.object({
+  userId: import_zod2.z.string().min(1),
+  relloAgentId: import_zod2.z.string().min(1).nullable(),
+  email: import_zod2.z.string(),
+  firstName: import_zod2.z.string(),
+  lastName: import_zod2.z.string(),
+  role: import_zod2.z.string(),
+  isOwner: import_zod2.z.boolean()
+});
+var teamLoginRosterResponseSchema = import_zod2.z.object({
+  included: rosterCount.nullable(),
+  purchased: rosterCount,
+  capacity: rosterCount.nullable(),
+  members: rosterCount,
+  overBy: rosterCount,
+  addOnCatalogKey: import_zod2.z.literal("pfp-extra-team-login"),
+  people: import_zod2.z.array(teamLoginRosterMemberSchema)
+}).refine((r) => r.included === null === (r.capacity === null), {
+  message: "included and capacity are null together"
+});
+var rosterErrorSchema = import_zod2.z.object({
+  code: import_zod2.z.string().min(1),
+  /** For a person. */
+  error: import_zod2.z.string()
+}).loose();
+function isRosterErrorCode(code) {
+  return typeof code === "string" && ROSTER_ERROR_CODES.includes(code);
+}
+var signatureQuantityNeededSchema = import_zod2.z.object({
+  code: import_zod2.z.literal("signature_quantity_needed"),
+  error: import_zod2.z.string(),
+  purchased: rosterCount,
+  extras: rosterCount,
+  addOnCatalogKey: import_zod2.z.literal("pfp-extra-signature")
+});
+var alreadyMemberSchema = import_zod2.z.object({
+  code: import_zod2.z.literal("already_member"),
+  error: import_zod2.z.string(),
+  userId: import_zod2.z.string().min(1),
+  isActive: import_zod2.z.boolean()
+});
+var loginQuantityNeededSchema = import_zod2.z.object({
+  code: import_zod2.z.literal("login_quantity_needed"),
+  error: import_zod2.z.string(),
+  included: rosterCount,
+  purchased: rosterCount,
+  members: rosterCount,
+  addOnCatalogKey: import_zod2.z.literal("pfp-extra-team-login")
+});
 
 // src/types/sms-setup.ts
 var import_zod3 = require("zod");
@@ -2518,6 +2640,90 @@ var previewStaleErrorSchema = import_zod4.z.object({
   error: import_zod4.z.literal("preview_stale"),
   reason: import_zod4.z.string().optional()
 });
+var membersExceedTargetErrorSchema = import_zod4.z.object({
+  error: import_zod4.z.literal("members_exceed_target"),
+  activeMembers: import_zod4.z.number().int().nonnegative(),
+  targetLimit: import_zod4.z.number().int().nonnegative(),
+  /** For a person, as on every other plan-switch refusal. */
+  message: import_zod4.z.string().optional()
+}).strict();
+var isoInstant = import_zod4.z.string().min(1);
+var minorAmount = import_zod4.z.number().int();
+var planSwitchPreviewLineSchema = import_zod4.z.object({
+  description: import_zod4.z.string(),
+  amount: minorAmount,
+  currency: import_zod4.z.string().min(1),
+  period: import_zod4.z.object({ start: isoInstant, end: isoInstant }),
+  proration: import_zod4.z.boolean()
+});
+var planSwitchPreviewSubscriptionSchema = import_zod4.z.object({
+  kind: import_zod4.z.enum(["plan", "addon"]),
+  lines: import_zod4.z.array(planSwitchPreviewLineSchema),
+  total: minorAmount
+});
+var planSwitchPreviewResponseSchema = import_zod4.z.object({
+  previewId: import_zod4.z.string().min(1),
+  expiresAt: isoInstant,
+  prorationDate: isoInstant,
+  requiresConfirmation: import_zod4.z.boolean(),
+  subscriptions: import_zod4.z.array(planSwitchPreviewSubscriptionSchema),
+  planChange: import_zod4.z.object({
+    from: import_zod4.z.string().min(1),
+    to: import_zod4.z.string().min(1),
+    fromInterval: intervalField,
+    toInterval: intervalField
+  }),
+  chargeChange: import_zod4.z.object({ carriedCheckYourRateSeat: import_zod4.z.boolean(), refiRadarDrops: import_zod4.z.boolean() })
+});
+var planSwitchStepSchema = import_zod4.z.object({
+  index: import_zod4.z.number().int().nonnegative(),
+  kind: import_zod4.z.string().min(1),
+  state: import_zod4.z.enum(["PENDING", "IN_FLIGHT", "DONE"])
+});
+var planSwitchAppliedResponseSchema = import_zod4.z.object({
+  operationId: import_zod4.z.string().min(1),
+  status: import_zod4.z.literal("APPLIED"),
+  steps: import_zod4.z.array(planSwitchStepSchema),
+  planSlug: import_zod4.z.string().min(1),
+  interval: intervalField,
+  invoiceIds: import_zod4.z.array(import_zod4.z.string())
+});
+var planSwitchOpenResponseSchema = import_zod4.z.object({
+  operationId: import_zod4.z.string().min(1),
+  status: import_zod4.z.literal("OPEN")
+});
+var planSwitchResponseSchema = import_zod4.z.discriminatedUnion("status", [
+  planSwitchAppliedResponseSchema,
+  planSwitchOpenResponseSchema
+]);
+var planSwitchOperationResponseSchema = import_zod4.z.object({
+  operationId: import_zod4.z.string().min(1),
+  status: import_zod4.z.enum(["OPEN", "APPLIED", "FAILED", "COMPENSATED"]),
+  steps: import_zod4.z.array(planSwitchStepSchema),
+  previewId: import_zod4.z.string().min(1).nullable(),
+  invoiceIds: import_zod4.z.array(import_zod4.z.string()),
+  resolutionNeeded: import_zod4.z.boolean(),
+  unknownSince: isoInstant.nullable()
+});
+var switchInProgressErrorSchema = import_zod4.z.object({
+  error: import_zod4.z.literal("switch_in_progress"),
+  operationId: import_zod4.z.string().min(1)
+});
+var PLAN_SWITCH_DEDICATED_ERROR_CODES = ["members_exceed_target", "preview_stale", "switch_in_progress"];
+var DEDICATED_CODES = new Set(PLAN_SWITCH_DEDICATED_ERROR_CODES);
+var planSwitchOtherErrorSchema = import_zod4.z.object({
+  error: import_zod4.z.string().min(1).refine((code) => !DEDICATED_CODES.has(code), { message: "this code has its own schema" }),
+  message: import_zod4.z.string().optional()
+}).loose();
+var planSwitchErrorSchema = import_zod4.z.union([
+  membersExceedTargetErrorSchema,
+  previewStaleErrorSchema,
+  switchInProgressErrorSchema,
+  planSwitchOtherErrorSchema
+]);
+function isMembersExceedTargetError(e) {
+  return membersExceedTargetErrorSchema.safeParse(e).success;
+}
 var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
 var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
 var addOnQuantityRequestSchema = import_zod4.z.object({
@@ -2590,6 +2796,83 @@ function isMembersExceedQuantityError(e) {
   return membersExceedQuantityErrorSchema.safeParse(e).success;
 }
 
+// src/types/v1-billing-reads.ts
+var import_zod5 = require("zod");
+var V1_TENANT_MATCH_ERRORS = Object.freeze({
+  /** A tenant-scoped key sent an X-Tenant-Id naming another tenant. Nothing was read for either. */
+  tenantHeaderMismatch: "Forbidden \u2014 tenant header does not match credential",
+  /** The key's app is not one these routes serve (pathfinder-pro today). */
+  callerAppNotAllowed: "Forbidden \u2014 caller app not allowed"
+});
+function appNotEnabledForTenantError(appSlug) {
+  return `Forbidden \u2014 app '${appSlug}' is not enabled for tenant`;
+}
+var v1TenantMatchErrorSchema = import_zod5.z.object({ error: import_zod5.z.string().min(1) });
+var planGrantsReadResponseSchema = import_zod5.z.object({
+  rev: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  grants: import_zod5.z.array(import_zod5.z.string().min(1)),
+  planSlug: import_zod5.z.string().min(1),
+  cyr: tenantCyrStateSchema.nullable()
+});
+var PLAN_GRANTS_READ_ERROR_CODES = ["no_plan_grants", "plan_grants_unavailable"];
+var planGrantsReadErrorSchema = import_zod5.z.object({ error: import_zod5.z.enum(PLAN_GRANTS_READ_ERROR_CODES) });
+var addOnUnitPriceSchema = import_zod5.z.object({
+  monthly: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+  yearly: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+});
+var TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"];
+var v1AddOnTenantSubscriptionSchema = import_zod5.z.object({
+  status: import_zod5.z.string().min(1),
+  quantity: import_zod5.z.number().int().nonnegative(),
+  requestedQuantity: import_zod5.z.number().int().nonnegative().nullable(),
+  quantityRev: import_zod5.z.string().regex(/^\d{1,19}$/).nullable(),
+  trialEndsAt: import_zod5.z.string().datetime({ offset: true }).nullable()
+});
+var v1AddOnReadSchema = import_zod5.z.object({
+  id: import_zod5.z.string().min(1),
+  appSlug: import_zod5.z.string().min(1),
+  name: import_zod5.z.string().min(1),
+  type: import_zod5.z.enum(["RECURRING", "ONE_TIME"]),
+  isActive: import_zod5.z.boolean(),
+  price: addOnUnitPriceSchema,
+  tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable()
+});
+var v1AddOnsReadResponseSchema = import_zod5.z.object({ addOns: import_zod5.z.array(v1AddOnReadSchema) });
+var ADD_ONS_READ_ERROR_CODES = ["add_ons_unavailable"];
+var addOnsReadErrorSchema = import_zod5.z.object({ error: import_zod5.z.enum(ADD_ONS_READ_ERROR_CODES) });
+var ADD_ON_START_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var addOnStartRequestSchema = import_zod5.z.object({
+  addOnId: import_zod5.z.string().min(1),
+  quantity: import_zod5.z.number().int().positive().optional(),
+  trial: import_zod5.z.boolean().optional(),
+  quantityRev: import_zod5.z.union([import_zod5.z.number().int().nonnegative(), import_zod5.z.string().regex(/^\d{1,18}$/)]).optional()
+}).strict();
+var addOnStartResponseSchema = import_zod5.z.object({
+  success: import_zod5.z.literal(true),
+  data: import_zod5.z.object({
+    tenantAddOnId: import_zod5.z.string().min(1),
+    status: import_zod5.z.string().min(1),
+    trialEndsAt: import_zod5.z.string().datetime({ offset: true }).nullable().optional()
+  })
+});
+var addOnStartErrorSchema = import_zod5.z.object({
+  success: import_zod5.z.literal(false),
+  error: import_zod5.z.string().min(1),
+  code: import_zod5.z.string().min(1).optional()
+}).loose();
+var ADD_ON_START_ERROR_CODES = [
+  "not_a_check_your_rate_addon",
+  "payment_method_required",
+  "tenant_not_found",
+  "addon_already_active",
+  "addon_state_unknown",
+  "already_entitled",
+  "engine_required",
+  "trial_already_used",
+  "addon_price_not_configured",
+  "stripe_failed"
+];
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2603,8 +2886,13 @@ function createServiceClient(config) {
   ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
   ADDON_QUANTITY_IDEMPOTENCY_HEADER,
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
+  ADD_ONS_READ_ERROR_CODES,
+  ADD_ON_START_ERROR_CODES,
+  ADD_ON_START_IDEMPOTENCY_HEADER,
   AdminResource,
   AuthResource,
+  PLAN_GRANTS_READ_ERROR_CODES,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS,
@@ -2619,11 +2907,20 @@ function createServiceClient(config) {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  TENANT_ADD_ON_STATUSES,
+  V1_TENANT_MATCH_ERRORS,
   addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,
   addOnQuantityResponseSchema,
+  addOnStartErrorSchema,
+  addOnStartRequestSchema,
+  addOnStartResponseSchema,
+  addOnUnitPriceSchema,
+  addOnsReadErrorSchema,
   agentProvisionPayloadSchema,
+  alreadyMemberSchema,
+  appNotEnabledForTenantError,
   businessIndustry,
   businessType,
   callerHasPermission,
@@ -2650,37 +2947,67 @@ function createServiceClient(config) {
   internalError,
   isExtraMlosExceedQuantityError,
   isMembersExceedQuantityError,
+  isMembersExceedTargetError,
+  isRosterErrorCode,
+  loginQuantityNeededSchema,
   loginlessAgentCreateRequestSchema,
+  loginlessAgentCreateResponseSchema,
   loginlessAgentRemoveRequestSchema,
+  loginlessAgentRemoveResponseSchema,
   membersExceedQuantityErrorSchema,
+  membersExceedTargetErrorSchema,
   oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,
+  planGrantsReadErrorSchema,
+  planGrantsReadResponseSchema,
+  planSwitchAppliedResponseSchema,
+  planSwitchErrorSchema,
+  planSwitchOpenResponseSchema,
+  planSwitchOperationResponseSchema,
+  planSwitchOtherErrorSchema,
+  planSwitchPreviewLineSchema,
   planSwitchPreviewQuerySchema,
+  planSwitchPreviewResponseSchema,
+  planSwitchPreviewSubscriptionSchema,
   planSwitchRequestSchema,
+  planSwitchResponseSchema,
+  planSwitchStepSchema,
   previewStaleErrorSchema,
   provisionedAgentSchema,
   quoteVersion,
   registrationConflict,
   resetImplicitApiKeyUses,
+  rosterErrorSchema,
   runRelloPermissionSelfCheck,
   setupChargeChangedEvent,
   setupChargeEnvelope,
   setupChargeRequest,
   setupChargeStatus,
+  signatureQuantityNeededSchema,
   smsOtpRequest,
   smsRegistrationChangedEvent,
   smsRegistrationEnvelope,
   smsRegistrationRequest,
   smsRegistrationStatus,
+  switchInProgressErrorSchema,
+  teamLoginRosterMemberSchema,
   teamLoginRosterQuerySchema,
+  teamLoginRosterResponseSchema,
   teamMemberCreateRequestSchema,
+  teamMemberCreateResponseSchema,
   teamMemberRemoveRequestSchema,
+  teamMemberRemoveResponseSchema,
   teamMemberSignInLinkRequestSchema,
+  teamMemberSignInLinkResponseSchema,
   tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,
   tenantPlanGrantsSchema,
-  tenantProvisioningPayloadSchema
+  tenantProvisioningPayloadSchema,
+  v1AddOnReadSchema,
+  v1AddOnTenantSubscriptionSchema,
+  v1AddOnsReadResponseSchema,
+  v1TenantMatchErrorSchema
 });
 //# sourceMappingURL=index.cjs.map

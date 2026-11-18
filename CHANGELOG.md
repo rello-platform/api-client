@@ -6,6 +6,95 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.37.0 — 2026-11-17
+
+### Added — Rello's tenant-bound v1 billing reads, the add-on start, and zod for the v2.36.0 answers (PFP Gateway P-1)
+
+Platform KA prompt 1221, rulings 1247 / 1248 / 1261; spec SPEC-PFP-GATEWAY.md
+§4.2 / §4.3. Rello side: P-1's PR (requireV1TenantMatch, GET
+/api/v1/billing/plan-grants, GET /api/v1/billing/add-ons). Version read at
+2026-11-17: v2.36.0 tagged (#17), no open PR claims v2.37.0 (#10 takes the
+next free version when it merges).
+
+- `src/types/v1-billing-reads.ts`, one contract for Rello's routes and
+  PathfinderPro's callers:
+  - The §4.2 tenant 403 texts: `V1_TENANT_MATCH_ERRORS`,
+    `appNotEnabledForTenantError(slug)`, `v1TenantMatchErrorSchema`.
+  - Plan-grants read: `planGrantsReadResponseSchema` { rev, grants, planSlug,
+    cyr }. `cyr` is REQUIRED and nullable (the tenant's effective Check Your
+    Rate record, the `tenantCyrStateSchema` shape; null = never held; a body
+    without the key is refused, A-286). `canceledAt` is null on this read,
+    CANCELED included (ruling 1261): use `occurredAt` as the cancel time.
+    `PLAN_GRANTS_READ_ERROR_CODES` (404 `no_plan_grants`, 503
+    `plan_grants_unavailable`).
+  - Add-ons read: `v1AddOnsReadResponseSchema` — the caller's add-ons with
+    `price` { monthly, yearly } in integer cents (null = unknown, never $0; a
+    determined 0 is a real 0) and this tenant's `tenantAddOn` or null, whose
+    `quantityRev` is a decimal string (a BIGINT). `ADD_ONS_READ_ERROR_CODES`
+    (503 `add_ons_unavailable`). Needs `billing:read` granted to pathfinder-pro
+    and carried on PFP's key before PFP can call it.
+  - The add-on start (R1, as served at Rello 0ae41a132):
+    `addOnStartRequestSchema` (strict: addOnId, quantity?, trial?,
+    quantityRev? as an integer or a 1–18 digit string),
+    `ADD_ON_START_IDEMPOTENCY_HEADER` ("X-Idempotency-Key"),
+    `addOnStartResponseSchema` ({ success: true, data: { tenantAddOnId,
+    status, trialEndsAt? } }), `addOnStartErrorSchema` (`.loose()`, so a code's
+    fields like `needsPaymentMethod` / `coveredSeats` are kept) and
+    `ADD_ON_START_ERROR_CODES` (R1's ten, with `addon_price_not_configured`
+    the 409 for a missing TEAM/DEFAULT price, carrying `family`, `interval`
+    and `addOnId`; see GD-2250 below).
+  - GD-2250 (AUDIT 111, KA 1325): the list named `addon_pricing_not_configured`
+    and omitted `addon_price_not_configured`, the code Rello main sends
+    (`src/lib/billing/cyr-price.ts`, forwarded by `POST /api/v1/billing/add-on`).
+    The list now names `addon_price_not_configured`. `addon_pricing_not_configured`
+    is removed: at Rello origin/main a8cf79a8e (contains b654fdafe) nothing
+    sends it; its only occurrence is a comment in
+    `src/lib/billing/v1/add-on-unit-price.ts`. The list was introduced in this
+    unreleased version, so v2.36.0 callers lose nothing. `code` stays an open
+    string, so a body carrying the old spelling still parses.
+- Zod for the answers v2.36.0 shipped as types only:
+  - Roster (`src/types/roster.ts`): the six answers, `rosterErrorSchema`
+    (`code` a plain string, `.loose()`), `isRosterErrorCode`, and the three
+    exact refusals.
+  - Plan switch (`src/types/billing-switch.ts`): preview, applied / open
+    (discriminated on `status`), operation, `switch_in_progress`, the other
+    refusals, and `planSwitchErrorSchema`.
+  - 409 `members_exceed_target`: `{ error: "members_exceed_target",
+    activeMembers, targetLimit, message? }`, strict, non-negative integers —
+    the plan-switch envelope with X1's counts (ruling 1248 Q2).
+  - `planSwitchErrorSchema` parses a dedicated code only through its own
+    schema (AUDIT 111 GD-2146, KA 1275). `planSwitchOtherErrorSchema`, the open
+    branch, refuses `members_exceed_target`, `preview_stale` and
+    `switch_in_progress` (`PLAN_SWITCH_DEDICATED_ERROR_CODES`), so a malformed
+    one is refused rather than accepted. Every other code parses there,
+    including a future one.
+
+### Changed — `PlanSwitchError` (type only; no known consumer)
+
+- `PlanSwitchError`'s `members_exceed_target` branch now requires
+  `activeMembers` and `targetLimit`: the envelope ruled in 1248. In v2.36.0 it
+  was part of the generic `{ error, message? }` branch. A value assigned as
+  `{ error: "members_exceed_target", message }` with no counts no longer
+  compiles (AUDIT 111 GD-2147).
+- KA compatibility exception (1275): the KA checked every app's origin/main for
+  `PlanSwitchError` outside tests and found 0 consumers.
+- Every schema is `satisfies z.ZodType<Interface>`, so it can't drift from its
+  type.
+
+Tests, red on v2.36.0's dist (16 of 16) and green on this one (plus
+`tests/gd2146-plan-switch-error-family.test.mjs`: the auditor's five malformed
+bodies are refused, and well-formed, non-dedicated and future codes still
+parse; red 3 of 4 on the first v2.37.0 head):
+- `tests/p1-v1-billing-served.test.mjs` parses Rello's REAL served bodies
+  (`tests/fixtures/rello-v1-billing-served-dd8e6c00c.json`, captured from
+  Rello's own route tests on real Postgres). It covers plan-grants 200s in
+  every cyr status, the refusals, the 403s, the add-ons read, and the start's
+  200s and refusals.
+- `tests/p1-v1-billing-reads-zod.test.mjs` covers the roster against
+  `tests/fixtures/rello-roster-served-c4fceb59e.json` (real bodies). Its
+  plan-switch fixtures are HAND-WRITTEN, because no Rello route serves plan
+  switch yet.
+
 ## v2.36.0 — 2026-11-16
 
 ### Added — the G-10R + G-EXTRAS contract: plan switch and add-on quantity (PFP Gateway PKG-2)
