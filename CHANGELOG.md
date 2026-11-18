@@ -41,6 +41,15 @@ KA prompt 1306. New `src/types/embed-token.ts`:
 Tests: tests/p2-embed-token-f2.test.mjs, red 9/9 before the schemas existed,
 green 9/9 after; full suite 219/219.
 
+GD-2256 (PLATFORM AUDIT 114, KA 1328): `EMBED_TOKEN_ERRORS` now also names the
+routes' two 400s, `UNKNOWN_FIELD` (body carries `field`) and `invalid_body`
+(body carries `message`); `EMBED_TOKEN_ERROR_STATUS` maps both to 400 and its
+type is `400 | 404 | 409 | 503`. The shared v1 auth answers (401
+Unauthorized; 403 Forbidden / caller app not allowed / tenant header mismatch /
+app not enabled for tenant; mint's 429) stay out of the map and are documented
+beside it. tests/gd2256-embed-token-400-codes.test.mjs: red 0/3, green 3/3;
+full suite 245/245.
+
 ## v2.37.0 — 2026-11-17
 
 ### Added — Rello's tenant-bound v1 billing reads, the add-on start, and zod for the v2.36.0 answers (PFP Gateway P-1)

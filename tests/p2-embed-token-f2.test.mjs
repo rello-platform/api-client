@@ -120,10 +120,12 @@ test("tenant-app-access response: tenantId and servable boolean, strict", () => 
   assert.equal(s.safeParse({ tenantId: "t1" }).success, false, "servable required: absent is unknown, not false");
 });
 
-test("EMBED_TOKEN_ERRORS: the six { error } codes the routes answer, with their statuses", () => {
+test("EMBED_TOKEN_ERRORS: the eight { error } codes the routes answer, with their statuses (two 400s: GD-2256)", () => {
   const e = api.EMBED_TOKEN_ERRORS;
   assert.ok(e, "EMBED_TOKEN_ERRORS missing");
   assert.deepEqual({ ...e }, {
+    UNKNOWN_FIELD: "UNKNOWN_FIELD",
+    INVALID_BODY: "invalid_body",
     AGENT_NOT_IN_TENANT: "agent_not_in_tenant",
     AGENT_INACTIVE: "agent_inactive",
     HOME_SCOUT_NOT_ENABLED: "home_scout_not_enabled",
@@ -133,6 +135,8 @@ test("EMBED_TOKEN_ERRORS: the six { error } codes the routes answer, with their 
   });
   assert.ok(Object.isFrozen(e));
   assert.deepEqual({ ...api.EMBED_TOKEN_ERROR_STATUS }, {
+    UNKNOWN_FIELD: 400,
+    invalid_body: 400,
     agent_not_in_tenant: 404,
     agent_inactive: 409,
     home_scout_not_enabled: 409,

@@ -2942,6 +2942,8 @@ var tenantAppAccessResponseSchema = import_zod6.z.object({
   servable: import_zod6.z.boolean()
 }).strict();
 var EMBED_TOKEN_ERRORS = Object.freeze({
+  UNKNOWN_FIELD: "UNKNOWN_FIELD",
+  INVALID_BODY: "invalid_body",
   AGENT_NOT_IN_TENANT: "agent_not_in_tenant",
   AGENT_INACTIVE: "agent_inactive",
   HOME_SCOUT_NOT_ENABLED: "home_scout_not_enabled",
@@ -2950,6 +2952,8 @@ var EMBED_TOKEN_ERRORS = Object.freeze({
   TENANT_APP_ACCESS_UNAVAILABLE: "tenant_app_access_unavailable"
 });
 var EMBED_TOKEN_ERROR_STATUS = Object.freeze({
+  UNKNOWN_FIELD: 400,
+  invalid_body: 400,
   agent_not_in_tenant: 404,
   agent_inactive: 409,
   home_scout_not_enabled: 409,

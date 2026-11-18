@@ -4339,16 +4339,37 @@ declare const tenantAppAccessResponseSchema: z.ZodObject<{
 type TenantAppAccessResponse = z.infer<typeof tenantAppAccessResponseSchema>;
 /**
  * The `error` codes these routes answer in a `{ error: <code> }` body (beside
- * the shared v1 auth refusals). Statuses in {@link EMBED_TOKEN_ERROR_STATUS}.
+ * the shared v1 auth refusals, below). Statuses in {@link EMBED_TOKEN_ERROR_STATUS}.
  *
+ *  400 UNKNOWN_FIELD                  a body (or F2 query) key the route does not
+ *                                     take; the body also carries `field`, the key
+ *                                     ({ error: "UNKNOWN_FIELD", field: "tenantId" })
+ *  400 invalid_body                   a body that is not JSON, not an object, or has
+ *                                     a bad value; the body also carries `message`
+ *                                     ({ error: "invalid_body", message: "..." })
  *  404 agent_not_in_tenant            the mint's agentId is not this tenant's
  *  409 agent_inactive                 the agent exists but is not active
  *  409 home_scout_not_enabled         the tenant has no Home Scout
  *  409 tenant_not_servable            PathfinderPro may not act for this tenant
  *  503 embed_token_unavailable        mint or verify could not tell: UNKNOWN
- *  503 tenant_app_access_unavailable  F2 could not tell: UNKNOWN
+ *  503 tenant_app_access_unavailable  F2 could not tell: UNKNOWN (a failed ApiKey
+ *                                     read in the auth chain answers these 503s too)
+ *
+ * NOT in this map — the shared v1 auth refusals, answered before the route
+ * reads anything (every one with Cache-Control: no-store):
+ *  401 { error: "Unauthorized" }                     no valid ApiKey
+ *  403 { error: "Forbidden" }                        the key lacks the route's permission
+ *  403 { error: "Forbidden — caller app not allowed" }
+ *                                                    mint: not pathfinder-pro;
+ *                                                    verify / F2: not home-scout
+ *  403 { error: "Forbidden — tenant header does not match credential" }
+ *  403 { error: "Forbidden — app 'pathfinder-pro' is not enabled for tenant" }
+ *                                                    mint only (the tenant binding)
+ *  429 per-app rate limit, with Retry-After          mint only (requireV1Auth)
  */
 declare const EMBED_TOKEN_ERRORS: Readonly<{
+    readonly UNKNOWN_FIELD: "UNKNOWN_FIELD";
+    readonly INVALID_BODY: "invalid_body";
     readonly AGENT_NOT_IN_TENANT: "agent_not_in_tenant";
     readonly AGENT_INACTIVE: "agent_inactive";
     readonly HOME_SCOUT_NOT_ENABLED: "home_scout_not_enabled";
@@ -4358,7 +4379,7 @@ declare const EMBED_TOKEN_ERRORS: Readonly<{
 }>;
 type EmbedTokenErrorCode = (typeof EMBED_TOKEN_ERRORS)[keyof typeof EMBED_TOKEN_ERRORS];
 /** The HTTP status Rello answers with each {@link EMBED_TOKEN_ERRORS} code. */
-declare const EMBED_TOKEN_ERROR_STATUS: Readonly<Record<EmbedTokenErrorCode, 404 | 409 | 503>>;
+declare const EMBED_TOKEN_ERROR_STATUS: Readonly<Record<EmbedTokenErrorCode, 400 | 404 | 409 | 503>>;
 /** Home Scout asks the PFP host for a fresh token before the current one expires. */
 declare const EMBED_TOKEN_REFRESH_MESSAGE: "pfp-embed:token-refresh";
 /** The PFP host hands Home Scout a freshly minted token. */
