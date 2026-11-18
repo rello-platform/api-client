@@ -97,6 +97,22 @@ export const addOnUnitPriceSchema = z.object({
 });
 export type AddOnUnitPrice = z.infer<typeof addOnUnitPriceSchema>;
 
+/**
+ * A ONE_TIME add-on's price (PFP Gateway G-LR Part B, Platform KA prompt 1323):
+ * `once` is integer cents for one purchase, the price Kelly sets on the add-on
+ * in Platform Admin (Rello's "once" catalog slot). `null` means no one-time
+ * price is set (unknown, never $0); the key is always present on a ONE_TIME
+ * item. A ONE_TIME add-on has no per-interval price, so `monthly` and `yearly`
+ * are always null. A RECURRING add-on's price stays `addOnUnitPriceSchema`,
+ * with no `once` key.
+ */
+export const addOnOneTimePriceSchema = z.object({
+  monthly: z.null(),
+  yearly: z.null(),
+  once: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+});
+export type AddOnOneTimePrice = z.infer<typeof addOnOneTimePriceSchema>;
+
 /** Rello's SubscriptionStatus values today. `status` parses as a plain string so a later status never fails the read. */
 export const TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"] as const;
 
@@ -114,16 +130,24 @@ export const v1AddOnTenantSubscriptionSchema = z.object({
 });
 export type V1AddOnTenantSubscription = z.infer<typeof v1AddOnTenantSubscriptionSchema>;
 
-/** One add-on the caller's app owns, active or not (`isActive` false = retired from sale; existing subscribers keep it). */
-export const v1AddOnReadSchema = z.object({
+const v1AddOnReadFields = {
   id: z.string().min(1),
   appSlug: z.string().min(1),
   name: z.string().min(1),
-  type: z.enum(["RECURRING", "ONE_TIME"]),
   isActive: z.boolean(),
-  price: addOnUnitPriceSchema,
   tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable(),
-});
+};
+
+/**
+ * One add-on the caller's app owns, active or not (`isActive` false = retired
+ * from sale; existing subscribers keep it). Discriminated on `type`: a
+ * RECURRING item's price is `{ monthly, yearly }` (unchanged); a ONE_TIME
+ * item's price also carries `once` (G-LR Part B).
+ */
+export const v1AddOnReadSchema = z.discriminatedUnion("type", [
+  z.object({ ...v1AddOnReadFields, type: z.literal("RECURRING"), price: addOnUnitPriceSchema }),
+  z.object({ ...v1AddOnReadFields, type: z.literal("ONE_TIME"), price: addOnOneTimePriceSchema }),
+]);
 export type V1AddOnRead = z.infer<typeof v1AddOnReadSchema>;
 
 /**
