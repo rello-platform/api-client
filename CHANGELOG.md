@@ -6,6 +6,50 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.38.0 — unpublished (not tagged)
+
+### Added — the embed token and F2 tenant app access (PFP Gateway P-2)
+
+`package.json` reads 2.38.0; no tag is cut here. The tag waits for the Rello
+P-2 PR's re-audit (AUDIT 114, round 2) and the KA. Merged onto main after
+v2.37.0 (#18) was tagged (Platform KA prompt 1328); dist rebuilt from the
+merged sources.
+
+Map MAP-P2-EMBED-TOKEN-F2-261118.md (sha256
+114f1378ecda0a07cf5c5ba402c9481ffd8b99ea5453465e16746d7f046d7768), Platform
+KA prompt 1306. New `src/types/embed-token.ts`:
+
+- Mint, PathfinderPro → Rello `POST /api/v1/embed-tokens`:
+  `embedTokenMintRequestSchema` (strict; `agentId`, `surface` identity |
+  rate-widget) and `embedTokenMintResponseSchema` (strict; `token` starting
+  `rpe_`, ISO `expiresAt`, `audience` "home-scout", `scope`, `tenantId`,
+  `agentId`). `EMBED_SURFACE_SCOPE` maps identity → hs:identity-editor and
+  rate-widget → hs:rate-widget.
+- Verify, Home Scout → Rello `POST /api/v1/embed-tokens/verify`:
+  `embedTokenVerifyRequestSchema` (strict; `token`) and
+  `embedTokenVerifyResponseSchema`, a union on `valid` (`true` with tenantId,
+  agentId, scope, expiresAt; `false` with reason expired | revoked |
+  unknown_token). A 503, a timeout or an unparseable body is UNKNOWN, never
+  `valid: false`.
+- F2, Home Scout → Rello `GET /api/v1/platform/tenant-app-access?tenantId=`:
+  `tenantAppAccessResponseSchema` (strict; `tenantId`, `servable`).
+- `EMBED_TOKEN_ERRORS` (six `{ error }` codes) and `EMBED_TOKEN_ERROR_STATUS`;
+  postMessage types `EMBED_TOKEN_REFRESH_MESSAGE` ("pfp-embed:token-refresh"),
+  `EMBED_TOKEN_MESSAGE` ("pfp-embed:token") and `EMBED_SESSION_EXPIRED_MESSAGE`
+  ("pfp-embed:session-expired").
+
+Tests: tests/p2-embed-token-f2.test.mjs, red 9/9 before the schemas existed,
+green 9/9 after; full suite 219/219.
+
+GD-2256 (PLATFORM AUDIT 114, KA 1328): `EMBED_TOKEN_ERRORS` now also names the
+routes' two 400s, `UNKNOWN_FIELD` (body carries `field`) and `invalid_body`
+(body carries `message`); `EMBED_TOKEN_ERROR_STATUS` maps both to 400 and its
+type is `400 | 404 | 409 | 503`. The shared v1 auth answers (401
+Unauthorized; 403 Forbidden / caller app not allowed / tenant header mismatch /
+app not enabled for tenant; mint's 429) stay out of the map and are documented
+beside it. tests/gd2256-embed-token-400-codes.test.mjs: red 0/3, green 3/3;
+full suite 245/245.
+
 ## v2.37.0 — 2026-11-17
 
 ### Added — Rello's tenant-bound v1 billing reads, the add-on start, and zod for the v2.36.0 answers (PFP Gateway P-1)
