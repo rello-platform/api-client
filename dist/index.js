@@ -2168,6 +2168,84 @@ var ROSTER_ERROR_CODES = [
   "internal_error"
   // 500: nothing was saved; try again
 ];
+var loginlessAgentCreateResponseSchema = z2.object({
+  relloAgentId: z2.string().min(1),
+  slug: z2.string().min(1),
+  email: z2.string().min(1),
+  replayed: z2.boolean()
+});
+var loginlessAgentRemoveResponseSchema = z2.object({
+  relloAgentId: z2.string().min(1),
+  status: z2.literal("INACTIVE"),
+  alreadyInactive: z2.boolean()
+});
+var teamMemberCreateResponseSchema = z2.object({
+  userId: z2.string().min(1),
+  relloAgentId: z2.string().min(1),
+  email: z2.string().min(1),
+  signInEmail: z2.literal("queued"),
+  replayed: z2.boolean()
+});
+var teamMemberSignInLinkResponseSchema = z2.object({
+  userId: z2.string().min(1),
+  signInEmail: z2.literal("queued"),
+  replayed: z2.boolean()
+});
+var teamMemberRemoveResponseSchema = z2.object({
+  userId: z2.string().min(1),
+  isActive: z2.literal(false),
+  alreadyInactive: z2.boolean()
+});
+var rosterCount = z2.number().int().nonnegative();
+var teamLoginRosterMemberSchema = z2.object({
+  userId: z2.string().min(1),
+  relloAgentId: z2.string().min(1).nullable(),
+  email: z2.string(),
+  firstName: z2.string(),
+  lastName: z2.string(),
+  role: z2.string(),
+  isOwner: z2.boolean()
+});
+var teamLoginRosterResponseSchema = z2.object({
+  included: rosterCount.nullable(),
+  purchased: rosterCount,
+  capacity: rosterCount.nullable(),
+  members: rosterCount,
+  overBy: rosterCount,
+  addOnCatalogKey: z2.literal("pfp-extra-team-login"),
+  people: z2.array(teamLoginRosterMemberSchema)
+}).refine((r) => r.included === null === (r.capacity === null), {
+  message: "included and capacity are null together"
+});
+var rosterErrorSchema = z2.object({
+  code: z2.string().min(1),
+  /** For a person. */
+  error: z2.string()
+}).loose();
+function isRosterErrorCode(code) {
+  return typeof code === "string" && ROSTER_ERROR_CODES.includes(code);
+}
+var signatureQuantityNeededSchema = z2.object({
+  code: z2.literal("signature_quantity_needed"),
+  error: z2.string(),
+  purchased: rosterCount,
+  extras: rosterCount,
+  addOnCatalogKey: z2.literal("pfp-extra-signature")
+});
+var alreadyMemberSchema = z2.object({
+  code: z2.literal("already_member"),
+  error: z2.string(),
+  userId: z2.string().min(1),
+  isActive: z2.boolean()
+});
+var loginQuantityNeededSchema = z2.object({
+  code: z2.literal("login_quantity_needed"),
+  error: z2.string(),
+  included: rosterCount,
+  purchased: rosterCount,
+  members: rosterCount,
+  addOnCatalogKey: z2.literal("pfp-extra-team-login")
+});
 
 // src/types/sms-setup.ts
 import { z as z3 } from "zod";
@@ -2410,6 +2488,90 @@ var previewStaleErrorSchema = z4.object({
   error: z4.literal("preview_stale"),
   reason: z4.string().optional()
 });
+var membersExceedTargetErrorSchema = z4.object({
+  error: z4.literal("members_exceed_target"),
+  activeMembers: z4.number().int().nonnegative(),
+  targetLimit: z4.number().int().nonnegative(),
+  /** For a person, as on every other plan-switch refusal. */
+  message: z4.string().optional()
+}).strict();
+var isoInstant = z4.string().min(1);
+var minorAmount = z4.number().int();
+var planSwitchPreviewLineSchema = z4.object({
+  description: z4.string(),
+  amount: minorAmount,
+  currency: z4.string().min(1),
+  period: z4.object({ start: isoInstant, end: isoInstant }),
+  proration: z4.boolean()
+});
+var planSwitchPreviewSubscriptionSchema = z4.object({
+  kind: z4.enum(["plan", "addon"]),
+  lines: z4.array(planSwitchPreviewLineSchema),
+  total: minorAmount
+});
+var planSwitchPreviewResponseSchema = z4.object({
+  previewId: z4.string().min(1),
+  expiresAt: isoInstant,
+  prorationDate: isoInstant,
+  requiresConfirmation: z4.boolean(),
+  subscriptions: z4.array(planSwitchPreviewSubscriptionSchema),
+  planChange: z4.object({
+    from: z4.string().min(1),
+    to: z4.string().min(1),
+    fromInterval: intervalField,
+    toInterval: intervalField
+  }),
+  chargeChange: z4.object({ carriedCheckYourRateSeat: z4.boolean(), refiRadarDrops: z4.boolean() })
+});
+var planSwitchStepSchema = z4.object({
+  index: z4.number().int().nonnegative(),
+  kind: z4.string().min(1),
+  state: z4.enum(["PENDING", "IN_FLIGHT", "DONE"])
+});
+var planSwitchAppliedResponseSchema = z4.object({
+  operationId: z4.string().min(1),
+  status: z4.literal("APPLIED"),
+  steps: z4.array(planSwitchStepSchema),
+  planSlug: z4.string().min(1),
+  interval: intervalField,
+  invoiceIds: z4.array(z4.string())
+});
+var planSwitchOpenResponseSchema = z4.object({
+  operationId: z4.string().min(1),
+  status: z4.literal("OPEN")
+});
+var planSwitchResponseSchema = z4.discriminatedUnion("status", [
+  planSwitchAppliedResponseSchema,
+  planSwitchOpenResponseSchema
+]);
+var planSwitchOperationResponseSchema = z4.object({
+  operationId: z4.string().min(1),
+  status: z4.enum(["OPEN", "APPLIED", "FAILED", "COMPENSATED"]),
+  steps: z4.array(planSwitchStepSchema),
+  previewId: z4.string().min(1).nullable(),
+  invoiceIds: z4.array(z4.string()),
+  resolutionNeeded: z4.boolean(),
+  unknownSince: isoInstant.nullable()
+});
+var switchInProgressErrorSchema = z4.object({
+  error: z4.literal("switch_in_progress"),
+  operationId: z4.string().min(1)
+});
+var PLAN_SWITCH_DEDICATED_ERROR_CODES = ["members_exceed_target", "preview_stale", "switch_in_progress"];
+var DEDICATED_CODES = new Set(PLAN_SWITCH_DEDICATED_ERROR_CODES);
+var planSwitchOtherErrorSchema = z4.object({
+  error: z4.string().min(1).refine((code) => !DEDICATED_CODES.has(code), { message: "this code has its own schema" }),
+  message: z4.string().optional()
+}).loose();
+var planSwitchErrorSchema = z4.union([
+  membersExceedTargetErrorSchema,
+  previewStaleErrorSchema,
+  switchInProgressErrorSchema,
+  planSwitchOtherErrorSchema
+]);
+function isMembersExceedTargetError(e) {
+  return membersExceedTargetErrorSchema.safeParse(e).success;
+}
 var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
 var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
 var addOnQuantityRequestSchema = z4.object({
@@ -2482,10 +2644,87 @@ function isMembersExceedQuantityError(e) {
   return membersExceedQuantityErrorSchema.safeParse(e).success;
 }
 
-// src/types/embed-token.ts
+// src/types/v1-billing-reads.ts
 import { z as z5 } from "zod";
-var embedTokenId = z5.string().min(1);
-var embedTokenTime = z5.iso.datetime({ offset: true });
+var V1_TENANT_MATCH_ERRORS = Object.freeze({
+  /** A tenant-scoped key sent an X-Tenant-Id naming another tenant. Nothing was read for either. */
+  tenantHeaderMismatch: "Forbidden \u2014 tenant header does not match credential",
+  /** The key's app is not one these routes serve (pathfinder-pro today). */
+  callerAppNotAllowed: "Forbidden \u2014 caller app not allowed"
+});
+function appNotEnabledForTenantError(appSlug) {
+  return `Forbidden \u2014 app '${appSlug}' is not enabled for tenant`;
+}
+var v1TenantMatchErrorSchema = z5.object({ error: z5.string().min(1) });
+var planGrantsReadResponseSchema = z5.object({
+  rev: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  grants: z5.array(z5.string().min(1)),
+  planSlug: z5.string().min(1),
+  cyr: tenantCyrStateSchema.nullable()
+});
+var PLAN_GRANTS_READ_ERROR_CODES = ["no_plan_grants", "plan_grants_unavailable"];
+var planGrantsReadErrorSchema = z5.object({ error: z5.enum(PLAN_GRANTS_READ_ERROR_CODES) });
+var addOnUnitPriceSchema = z5.object({
+  monthly: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+  yearly: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+});
+var TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"];
+var v1AddOnTenantSubscriptionSchema = z5.object({
+  status: z5.string().min(1),
+  quantity: z5.number().int().nonnegative(),
+  requestedQuantity: z5.number().int().nonnegative().nullable(),
+  quantityRev: z5.string().regex(/^\d{1,19}$/).nullable(),
+  trialEndsAt: z5.string().datetime({ offset: true }).nullable()
+});
+var v1AddOnReadSchema = z5.object({
+  id: z5.string().min(1),
+  appSlug: z5.string().min(1),
+  name: z5.string().min(1),
+  type: z5.enum(["RECURRING", "ONE_TIME"]),
+  isActive: z5.boolean(),
+  price: addOnUnitPriceSchema,
+  tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable()
+});
+var v1AddOnsReadResponseSchema = z5.object({ addOns: z5.array(v1AddOnReadSchema) });
+var ADD_ONS_READ_ERROR_CODES = ["add_ons_unavailable"];
+var addOnsReadErrorSchema = z5.object({ error: z5.enum(ADD_ONS_READ_ERROR_CODES) });
+var ADD_ON_START_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var addOnStartRequestSchema = z5.object({
+  addOnId: z5.string().min(1),
+  quantity: z5.number().int().positive().optional(),
+  trial: z5.boolean().optional(),
+  quantityRev: z5.union([z5.number().int().nonnegative(), z5.string().regex(/^\d{1,18}$/)]).optional()
+}).strict();
+var addOnStartResponseSchema = z5.object({
+  success: z5.literal(true),
+  data: z5.object({
+    tenantAddOnId: z5.string().min(1),
+    status: z5.string().min(1),
+    trialEndsAt: z5.string().datetime({ offset: true }).nullable().optional()
+  })
+});
+var addOnStartErrorSchema = z5.object({
+  success: z5.literal(false),
+  error: z5.string().min(1),
+  code: z5.string().min(1).optional()
+}).loose();
+var ADD_ON_START_ERROR_CODES = [
+  "not_a_check_your_rate_addon",
+  "payment_method_required",
+  "tenant_not_found",
+  "addon_already_active",
+  "addon_state_unknown",
+  "already_entitled",
+  "engine_required",
+  "trial_already_used",
+  "addon_price_not_configured",
+  "stripe_failed"
+];
+
+// src/types/embed-token.ts
+import { z as z6 } from "zod";
+var embedTokenId = z6.string().min(1);
+var embedTokenTime = z6.iso.datetime({ offset: true });
 var EMBED_SURFACES = ["identity", "rate-widget"];
 var EMBED_TOKEN_SCOPES = ["hs:identity-editor", "hs:rate-widget"];
 var EMBED_SURFACE_SCOPE = Object.freeze({
@@ -2494,43 +2733,43 @@ var EMBED_SURFACE_SCOPE = Object.freeze({
 });
 var EMBED_TOKEN_AUDIENCE = "home-scout";
 var EMBED_TOKEN_PREFIX = "rpe_";
-var embedTokenScope = z5.enum(EMBED_TOKEN_SCOPES);
-var embedTokenMintRequestSchema = z5.object({
+var embedTokenScope = z6.enum(EMBED_TOKEN_SCOPES);
+var embedTokenMintRequestSchema = z6.object({
   agentId: embedTokenId,
-  surface: z5.enum(EMBED_SURFACES)
+  surface: z6.enum(EMBED_SURFACES)
 }).strict();
-var embedTokenMintResponseSchema = z5.object({
-  token: z5.string().startsWith(EMBED_TOKEN_PREFIX).min(EMBED_TOKEN_PREFIX.length + 1),
+var embedTokenMintResponseSchema = z6.object({
+  token: z6.string().startsWith(EMBED_TOKEN_PREFIX).min(EMBED_TOKEN_PREFIX.length + 1),
   /** ISO-8601. */
   expiresAt: embedTokenTime,
-  audience: z5.literal(EMBED_TOKEN_AUDIENCE),
+  audience: z6.literal(EMBED_TOKEN_AUDIENCE),
   scope: embedTokenScope,
   tenantId: embedTokenId,
   agentId: embedTokenId
 }).strict();
-var embedTokenVerifyRequestSchema = z5.object({
-  token: z5.string().min(1)
+var embedTokenVerifyRequestSchema = z6.object({
+  token: z6.string().min(1)
 }).strict();
 var EMBED_TOKEN_INVALID_REASONS = ["expired", "revoked", "unknown_token"];
-var embedTokenVerifyValidSchema = z5.object({
-  valid: z5.literal(true),
+var embedTokenVerifyValidSchema = z6.object({
+  valid: z6.literal(true),
   tenantId: embedTokenId,
   agentId: embedTokenId,
   scope: embedTokenScope,
   /** ISO-8601. */
   expiresAt: embedTokenTime
 }).strict();
-var embedTokenVerifyInvalidSchema = z5.object({
-  valid: z5.literal(false),
-  reason: z5.enum(EMBED_TOKEN_INVALID_REASONS)
+var embedTokenVerifyInvalidSchema = z6.object({
+  valid: z6.literal(false),
+  reason: z6.enum(EMBED_TOKEN_INVALID_REASONS)
 }).strict();
-var embedTokenVerifyResponseSchema = z5.discriminatedUnion("valid", [
+var embedTokenVerifyResponseSchema = z6.discriminatedUnion("valid", [
   embedTokenVerifyValidSchema,
   embedTokenVerifyInvalidSchema
 ]);
-var tenantAppAccessResponseSchema = z5.object({
+var tenantAppAccessResponseSchema = z6.object({
   tenantId: embedTokenId,
-  servable: z5.boolean()
+  servable: z6.boolean()
 }).strict();
 var EMBED_TOKEN_ERRORS = Object.freeze({
   AGENT_NOT_IN_TENANT: "agent_not_in_tenant",
@@ -2564,6 +2803,9 @@ export {
   ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES,
   ADDON_QUANTITY_IDEMPOTENCY_HEADER,
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
+  ADD_ONS_READ_ERROR_CODES,
+  ADD_ON_START_ERROR_CODES,
+  ADD_ON_START_IDEMPOTENCY_HEADER,
   AdminResource,
   AuthResource,
   EMBED_SESSION_EXPIRED_MESSAGE,
@@ -2577,6 +2819,8 @@ export {
   EMBED_TOKEN_PREFIX,
   EMBED_TOKEN_REFRESH_MESSAGE,
   EMBED_TOKEN_SCOPES,
+  PLAN_GRANTS_READ_ERROR_CODES,
+  PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS,
@@ -2591,11 +2835,20 @@ export {
   RelloUnavailableError,
   RelloValidationError,
   ServiceClient,
+  TENANT_ADD_ON_STATUSES,
+  V1_TENANT_MATCH_ERRORS,
   addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,
   addOnQuantityResponseSchema,
+  addOnStartErrorSchema,
+  addOnStartRequestSchema,
+  addOnStartResponseSchema,
+  addOnUnitPriceSchema,
+  addOnsReadErrorSchema,
   agentProvisionPayloadSchema,
+  alreadyMemberSchema,
+  appNotEnabledForTenantError,
   businessIndustry,
   businessType,
   callerHasPermission,
@@ -2628,38 +2881,68 @@ export {
   internalError,
   isExtraMlosExceedQuantityError,
   isMembersExceedQuantityError,
+  isMembersExceedTargetError,
+  isRosterErrorCode,
+  loginQuantityNeededSchema,
   loginlessAgentCreateRequestSchema,
+  loginlessAgentCreateResponseSchema,
   loginlessAgentRemoveRequestSchema,
+  loginlessAgentRemoveResponseSchema,
   membersExceedQuantityErrorSchema,
+  membersExceedTargetErrorSchema,
   oneTimeFeeQuote,
   parseAgentPayload,
   parseTenantPayload,
+  planGrantsReadErrorSchema,
+  planGrantsReadResponseSchema,
+  planSwitchAppliedResponseSchema,
+  planSwitchErrorSchema,
+  planSwitchOpenResponseSchema,
+  planSwitchOperationResponseSchema,
+  planSwitchOtherErrorSchema,
+  planSwitchPreviewLineSchema,
   planSwitchPreviewQuerySchema,
+  planSwitchPreviewResponseSchema,
+  planSwitchPreviewSubscriptionSchema,
   planSwitchRequestSchema,
+  planSwitchResponseSchema,
+  planSwitchStepSchema,
   previewStaleErrorSchema,
   provisionedAgentSchema,
   quoteVersion,
   registrationConflict,
   resetImplicitApiKeyUses,
+  rosterErrorSchema,
   runRelloPermissionSelfCheck,
   setupChargeChangedEvent,
   setupChargeEnvelope,
   setupChargeRequest,
   setupChargeStatus,
+  signatureQuantityNeededSchema,
   smsOtpRequest,
   smsRegistrationChangedEvent,
   smsRegistrationEnvelope,
   smsRegistrationRequest,
   smsRegistrationStatus,
+  switchInProgressErrorSchema,
+  teamLoginRosterMemberSchema,
   teamLoginRosterQuerySchema,
+  teamLoginRosterResponseSchema,
   teamMemberCreateRequestSchema,
+  teamMemberCreateResponseSchema,
   teamMemberRemoveRequestSchema,
+  teamMemberRemoveResponseSchema,
   teamMemberSignInLinkRequestSchema,
+  teamMemberSignInLinkResponseSchema,
   tenantAppAccessResponseSchema,
   tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,
   tenantPlanGrantsSchema,
-  tenantProvisioningPayloadSchema
+  tenantProvisioningPayloadSchema,
+  v1AddOnReadSchema,
+  v1AddOnTenantSubscriptionSchema,
+  v1AddOnsReadResponseSchema,
+  v1TenantMatchErrorSchema
 };
 //# sourceMappingURL=index.js.map

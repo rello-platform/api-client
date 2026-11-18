@@ -1,0 +1,556 @@
+{
+ "source": "Rello a2/p1-v1-tenant-reads-1221 @ dd8e6c00c (main 0ae41a132 + P-1). plan-grants + add-ons: bodies read by src/app/api/v1/billing/{plan-grants,add-ons}/route.db.test.ts; add-on start: bodies built by src/app/api/v1/billing/add-on/route.ts under src/lib/billing/cyr-addon.db.test.ts. Real Postgres (test:lifecycle-db), captured 2026-11-17.",
+ "planGrants": [
+  {
+   "status": 200,
+   "body": {
+    "rev": 4294967301,
+    "grants": [
+     "pfp-full",
+     "check-your-rate"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": null
+   },
+   "test": "a tenant-scoped key with its own tenant in the header, or no header, reads its own row"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 4294967301,
+    "grants": [
+     "pfp-full",
+     "check-your-rate"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": null
+   },
+   "test": "a tenant-scoped key with its own tenant in the header, or no header, reads its own row"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 4294967301,
+    "grants": [
+     "pfp-full",
+     "check-your-rate"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": null
+   },
+   "test": "answers 200 { rev, grants, planSlug, cyr } for PFP's tenant-null key on an enabled tenant, rev a JSON number"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 7,
+    "grants": [
+     "pfp-rates"
+    ],
+    "planSlug": "pfp-rates",
+    "cyr": null
+   },
+   "test": "answers 200 { rev, grants, planSlug, cyr } for PFP's tenant-null key on an enabled tenant, rev a JSON number"
+  },
+  {
+   "status": 404,
+   "body": {
+    "error": "no_plan_grants"
+   },
+   "test": "answers 404 no_plan_grants when the read succeeds and there is no row"
+  },
+  {
+   "status": 503,
+   "body": {
+    "error": "plan_grants_unavailable"
+   },
+   "test": "answers 503, never 404 or an empty 200, when the read fails"
+  },
+  {
+   "status": 503,
+   "body": {
+    "error": "plan_grants_unavailable"
+   },
+   "test": "answers 503 for a row the wire cannot carry (rev past the safe-integer range), never a rounded rev"
+  },
+  {
+   "status": 503,
+   "body": {
+    "error": "plan_grants_unavailable"
+   },
+   "test": "answers 503 for a row with a null planSlug, as the push wire omits it"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 11,
+    "grants": [
+     "pfp-full"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": {
+     "featureSlug": "check-your-rate",
+     "status": "ACTIVE",
+     "quantity": 3,
+     "trialEndsAt": null,
+     "canceledAt": null,
+     "occurredAt": "2026-11-17T16:56:42.123Z",
+     "seq": 4294967299,
+     "source": "both"
+    }
+   },
+   "test": "cyr ACTIVE: every field from R1's row, seq a JSON number equal to the non-zero BIGINT column"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 11,
+    "grants": [
+     "pfp-full"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": {
+     "featureSlug": "check-your-rate",
+     "status": "TRIALING",
+     "quantity": 1,
+     "trialEndsAt": "2026-11-24T09:00:00.000Z",
+     "canceledAt": null,
+     "occurredAt": "2026-11-10T09:00:00.000Z",
+     "seq": 1,
+     "source": "addon"
+    }
+   },
+   "test": "cyr TRIALING carries the stored trialEndsAt"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 11,
+    "grants": [
+     "pfp-full"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": {
+     "featureSlug": "check-your-rate",
+     "status": "PAST_DUE",
+     "quantity": 2,
+     "trialEndsAt": null,
+     "canceledAt": null,
+     "occurredAt": "2026-11-15T12:30:00.500Z",
+     "seq": 4,
+     "source": "addon"
+    }
+   },
+   "test": "cyr PAST_DUE is served as stored"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 11,
+    "grants": [
+     "pfp-full"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": {
+     "featureSlug": "check-your-rate",
+     "status": "CANCELED",
+     "quantity": 0,
+     "trialEndsAt": null,
+     "canceledAt": null,
+     "occurredAt": "2026-11-16T08:00:00.001Z",
+     "seq": 6,
+     "source": "addon"
+    }
+   },
+   "test": "cyr CANCELED is served, never 503: canceledAt null and occurredAt = cyrLastOccurredAt (KA 1261 ruling (b))"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 11,
+    "grants": [
+     "pfp-full"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": null
+   },
+   "test": "cyr is null (never held) when the check-your-rate row has no record R1 wrote (cyrStatus null)"
+  },
+  {
+   "status": 200,
+   "body": {
+    "rev": 4294967301,
+    "grants": [
+     "pfp-full",
+     "check-your-rate"
+    ],
+    "planSlug": "pfp-pro",
+    "cyr": null
+   },
+   "test": "cyr is null when the tenant has no check-your-rate row, and the key is always present"
+  },
+  {
+   "status": 503,
+   "body": {
+    "error": "plan_grants_unavailable"
+   },
+   "test": "answers 503, never cyr null, when the Check Your Rate read fails"
+  },
+  {
+   "status": 503,
+   "body": {
+    "error": "plan_grants_unavailable"
+   },
+   "test": "answers 503 for a record whose cyrSeq is past the safe-integer range, never a rounded seq"
+  }
+ ],
+ "addOns": [
+  {
+   "status": 200,
+   "body": {
+    "addOns": [
+     {
+      "id": "ao_noid_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "NoId 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": null,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     },
+     {
+      "id": "ao_priced_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "Priced 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": 2999,
+       "yearly": 29900
+      },
+      "tenantAddOn": {
+       "status": "TRIALING",
+       "quantity": 2,
+       "requestedQuantity": 3,
+       "quantityRev": "9007199254740993",
+       "trialEndsAt": "2026-12-01T00:00:00.000Z"
+      }
+     },
+     {
+      "id": "ao_retired_6488_mwkz1ajh",
+      "appSlug": "PATHFINDER_PRO",
+      "name": "Retired 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": false,
+      "price": {
+       "monthly": 900,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     },
+     {
+      "id": "ao_zero_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "Zero 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": 0,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     }
+    ]
+   },
+   "test": "answers 200 with only the caller's add-ons, each priced in cents, and this tenant's subscription only"
+  },
+  {
+   "status": 200,
+   "body": {
+    "addOns": [
+     {
+      "id": "ao_noid_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "NoId 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": null,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     },
+     {
+      "id": "ao_priced_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "Priced 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": 2999,
+       "yearly": 29900
+      },
+      "tenantAddOn": {
+       "status": "TRIALING",
+       "quantity": 2,
+       "requestedQuantity": 3,
+       "quantityRev": "9007199254740993",
+       "trialEndsAt": "2026-12-01T00:00:00.000Z"
+      }
+     },
+     {
+      "id": "ao_retired_6488_mwkz1ajh",
+      "appSlug": "PATHFINDER_PRO",
+      "name": "Retired 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": false,
+      "price": {
+       "monthly": 900,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     },
+     {
+      "id": "ao_zero_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "Zero 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": 0,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     }
+    ]
+   },
+   "test": "quantityRev is a decimal string equal to the BIGINT column, exact past MAX_SAFE_INTEGER"
+  },
+  {
+   "status": 200,
+   "body": {
+    "addOns": [
+     {
+      "id": "ao_noid_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "NoId 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": null,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     },
+     {
+      "id": "ao_priced_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "Priced 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": 2999,
+       "yearly": 29900
+      },
+      "tenantAddOn": {
+       "status": "ACTIVE",
+       "quantity": 7,
+       "requestedQuantity": 7,
+       "quantityRev": "41",
+       "trialEndsAt": null
+      }
+     },
+     {
+      "id": "ao_retired_6488_mwkz1ajh",
+      "appSlug": "PATHFINDER_PRO",
+      "name": "Retired 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": false,
+      "price": {
+       "monthly": 900,
+       "yearly": null
+      },
+      "tenantAddOn": null
+     },
+     {
+      "id": "ao_zero_6488_mwkz1ajh",
+      "appSlug": "pathfinder-pro",
+      "name": "Zero 6488_mwkz1ajh",
+      "type": "RECURRING",
+      "isActive": true,
+      "price": {
+       "monthly": 0,
+       "yearly": null
+      },
+      "tenantAddOn": {
+       "status": "ACTIVE",
+       "quantity": 1,
+       "requestedQuantity": null,
+       "quantityRev": null,
+       "trialEndsAt": null
+      }
+     }
+    ]
+   },
+   "test": "tenant B sees its own rows, never A's"
+  },
+  {
+   "status": 503,
+   "body": {
+    "error": "add_ons_unavailable"
+   },
+   "test": "answers 503, never an empty list, when a read fails"
+  }
+ ],
+ "tenantMatch403": [
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden \u2014 tenant header does not match credential"
+   },
+   "test": "refuses a tenant-scoped key whose X-Tenant-Id names another tenant, reading nothing"
+  },
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden \u2014 caller app not allowed"
+   },
+   "test": "refuses another app's key that holds billing:read and is enabled on the tenant"
+  },
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden"
+   },
+   "test": "keeps the permission 403 distinct: no billing:read gets a bare Forbidden"
+  },
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden \u2014 tenant header does not match credential"
+   },
+   "test": "refuses a tenant-scoped key whose X-Tenant-Id names another tenant, and reads nothing for either"
+  },
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden \u2014 caller app not allowed"
+   },
+   "test": "refuses another app's tenant-null key that holds the permission and is enabled on the tenant"
+  },
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden \u2014 app 'pathfinder-pro' is not enabled for tenant"
+   },
+   "test": "refuses PFP's tenant-null key for a tenant where PFP is not enabled, naming the app"
+  },
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden"
+   },
+   "test": "keeps the permission 403 distinct: PFP's key without billing:plan-grants:read gets a bare Forbidden"
+  }
+ ],
+ "addOnStart": [
+  {
+   "status": 200,
+   "body": {
+    "success": true,
+    "data": {
+     "tenantAddOnId": "cmwkz2cek0008itaj03tmo3bk",
+     "status": "TRIALING",
+     "trialEndsAt": "2026-12-01T17:34:24.000Z"
+    }
+   },
+   "test": "a trial start makes the customer and its own subscription, writes the item + subscription pair, and emits TRIALING seq 1"
+  },
+  {
+   "status": 402,
+   "body": {
+    "success": false,
+    "error": "A payment method is needed to start this add-on",
+    "code": "payment_method_required",
+    "needsPaymentMethod": true
+   },
+   "test": "no trial and no card: 402 payment_method_required, nothing written, nothing emitted"
+  },
+  {
+   "status": 200,
+   "body": {
+    "success": true,
+    "data": {
+     "tenantAddOnId": "cmwkz2chq000nitajp7josxq9",
+     "status": "ACTIVE",
+     "trialEndsAt": null
+    }
+   },
+   "test": "no trial with a card on file: ACTIVE, error_if_incomplete sent"
+  },
+  {
+   "status": 502,
+   "body": {
+    "success": false,
+    "error": "Stripe did not confirm the add-on; nothing was saved. Retry.",
+    "code": "stripe_failed"
+   },
+   "test": "a lost reply after Stripe created the subscription: the retry under a NEW key adopts it, one subscription, the pair written"
+  },
+  {
+   "status": 409,
+   "body": {
+    "success": false,
+    "error": "This company has already had its Check Your Rate trial",
+    "code": "trial_already_used",
+    "needsPaymentMethod": true
+   },
+   "test": "one trial for life: after a cancel, trial:true is 409 trial_already_used {needsPaymentMethod} with no Stripe call"
+  },
+  {
+   "status": 400,
+   "body": {
+    "success": false,
+    "error": "Invalid request \u2014 addOnId is required; trial, quantity and quantityRev are the only other fields"
+   },
+   "test": "the admin comp: a 100%-forever coupon, no trial, compedCouponId written; a v1 caller can never pass a coupon"
+  },
+  {
+   "status": 409,
+   "body": {
+    "success": false,
+    "error": "The tenant's plan already includes Check Your Rate for these pages",
+    "code": "already_entitled",
+    "coveredSeats": 1
+   },
+   "test": "already_entitled: the plan covers the page \u2192 409; one page more \u2192 only the extra seat is charged and source is both"
+  },
+  {
+   "status": 409,
+   "body": {
+    "success": false,
+    "error": "Badge removal needs an active Check Your Rate subscription",
+    "code": "engine_required"
+   },
+   "test": "badge removal needs a live engine (409 engine_required), then rides the engine's subscription and emits its own seq"
+  },
+  {
+   "status": 403,
+   "body": {
+    "success": false,
+    "error": "Forbidden \u2014 this add-on belongs to another app"
+   },
+   "test": "a spoke cannot start another app's add-on (403); a key without billing:write is refused (403)"
+  },
+  {
+   "status": 403,
+   "body": {
+    "error": "Forbidden"
+   },
+   "test": "a spoke cannot start another app's add-on (403); a key without billing:write is refused (403)"
+  }
+ ]
+}
