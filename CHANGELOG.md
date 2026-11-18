@@ -6,6 +6,38 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## Unreleased — the embed token and F2 tenant app access (PFP Gateway P-2)
+
+No version yet: `package.json` stays at 2.36.0 and no tag is cut here. A later
+seat takes the next free version after v2.37.0 exists and after the Rello P-2
+PR's audit, and renames this heading then.
+
+Map MAP-P2-EMBED-TOKEN-F2-261118.md (sha256
+114f1378ecda0a07cf5c5ba402c9481ffd8b99ea5453465e16746d7f046d7768), Platform
+KA prompt 1306. New `src/types/embed-token.ts`:
+
+- Mint, PathfinderPro → Rello `POST /api/v1/embed-tokens`:
+  `embedTokenMintRequestSchema` (strict; `agentId`, `surface` identity |
+  rate-widget) and `embedTokenMintResponseSchema` (strict; `token` starting
+  `rpe_`, ISO `expiresAt`, `audience` "home-scout", `scope`, `tenantId`,
+  `agentId`). `EMBED_SURFACE_SCOPE` maps identity → hs:identity-editor and
+  rate-widget → hs:rate-widget.
+- Verify, Home Scout → Rello `POST /api/v1/embed-tokens/verify`:
+  `embedTokenVerifyRequestSchema` (strict; `token`) and
+  `embedTokenVerifyResponseSchema`, a union on `valid` (`true` with tenantId,
+  agentId, scope, expiresAt; `false` with reason expired | revoked |
+  unknown_token). A 503, a timeout or an unparseable body is UNKNOWN, never
+  `valid: false`.
+- F2, Home Scout → Rello `GET /api/v1/platform/tenant-app-access?tenantId=`:
+  `tenantAppAccessResponseSchema` (strict; `tenantId`, `servable`).
+- `EMBED_TOKEN_ERRORS` (six `{ error }` codes) and `EMBED_TOKEN_ERROR_STATUS`;
+  postMessage types `EMBED_TOKEN_REFRESH_MESSAGE` ("pfp-embed:token-refresh"),
+  `EMBED_TOKEN_MESSAGE` ("pfp-embed:token") and `EMBED_SESSION_EXPIRED_MESSAGE`
+  ("pfp-embed:session-expired").
+
+Tests: tests/p2-embed-token-f2.test.mjs, red 9/9 before the schemas existed,
+green 9/9 after; full suite 219/219.
+
 ## v2.36.0 — 2026-11-16
 
 ### Added — the G-10R + G-EXTRAS contract: plan switch and add-on quantity (PFP Gateway PKG-2)

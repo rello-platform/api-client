@@ -2482,6 +2482,76 @@ function isMembersExceedQuantityError(e) {
   return membersExceedQuantityErrorSchema.safeParse(e).success;
 }
 
+// src/types/embed-token.ts
+import { z as z5 } from "zod";
+var embedTokenId = z5.string().min(1);
+var embedTokenTime = z5.iso.datetime({ offset: true });
+var EMBED_SURFACES = ["identity", "rate-widget"];
+var EMBED_TOKEN_SCOPES = ["hs:identity-editor", "hs:rate-widget"];
+var EMBED_SURFACE_SCOPE = Object.freeze({
+  identity: "hs:identity-editor",
+  "rate-widget": "hs:rate-widget"
+});
+var EMBED_TOKEN_AUDIENCE = "home-scout";
+var EMBED_TOKEN_PREFIX = "rpe_";
+var embedTokenScope = z5.enum(EMBED_TOKEN_SCOPES);
+var embedTokenMintRequestSchema = z5.object({
+  agentId: embedTokenId,
+  surface: z5.enum(EMBED_SURFACES)
+}).strict();
+var embedTokenMintResponseSchema = z5.object({
+  token: z5.string().startsWith(EMBED_TOKEN_PREFIX).min(EMBED_TOKEN_PREFIX.length + 1),
+  /** ISO-8601. */
+  expiresAt: embedTokenTime,
+  audience: z5.literal(EMBED_TOKEN_AUDIENCE),
+  scope: embedTokenScope,
+  tenantId: embedTokenId,
+  agentId: embedTokenId
+}).strict();
+var embedTokenVerifyRequestSchema = z5.object({
+  token: z5.string().min(1)
+}).strict();
+var EMBED_TOKEN_INVALID_REASONS = ["expired", "revoked", "unknown_token"];
+var embedTokenVerifyValidSchema = z5.object({
+  valid: z5.literal(true),
+  tenantId: embedTokenId,
+  agentId: embedTokenId,
+  scope: embedTokenScope,
+  /** ISO-8601. */
+  expiresAt: embedTokenTime
+}).strict();
+var embedTokenVerifyInvalidSchema = z5.object({
+  valid: z5.literal(false),
+  reason: z5.enum(EMBED_TOKEN_INVALID_REASONS)
+}).strict();
+var embedTokenVerifyResponseSchema = z5.discriminatedUnion("valid", [
+  embedTokenVerifyValidSchema,
+  embedTokenVerifyInvalidSchema
+]);
+var tenantAppAccessResponseSchema = z5.object({
+  tenantId: embedTokenId,
+  servable: z5.boolean()
+}).strict();
+var EMBED_TOKEN_ERRORS = Object.freeze({
+  AGENT_NOT_IN_TENANT: "agent_not_in_tenant",
+  AGENT_INACTIVE: "agent_inactive",
+  HOME_SCOUT_NOT_ENABLED: "home_scout_not_enabled",
+  TENANT_NOT_SERVABLE: "tenant_not_servable",
+  EMBED_TOKEN_UNAVAILABLE: "embed_token_unavailable",
+  TENANT_APP_ACCESS_UNAVAILABLE: "tenant_app_access_unavailable"
+});
+var EMBED_TOKEN_ERROR_STATUS = Object.freeze({
+  agent_not_in_tenant: 404,
+  agent_inactive: 409,
+  home_scout_not_enabled: 409,
+  tenant_not_servable: 409,
+  embed_token_unavailable: 503,
+  tenant_app_access_unavailable: 503
+});
+var EMBED_TOKEN_REFRESH_MESSAGE = "pfp-embed:token-refresh";
+var EMBED_TOKEN_MESSAGE = "pfp-embed:token";
+var EMBED_SESSION_EXPIRED_MESSAGE = "pfp-embed:session-expired";
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2496,6 +2566,17 @@ export {
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource,
   AuthResource,
+  EMBED_SESSION_EXPIRED_MESSAGE,
+  EMBED_SURFACES,
+  EMBED_SURFACE_SCOPE,
+  EMBED_TOKEN_AUDIENCE,
+  EMBED_TOKEN_ERRORS,
+  EMBED_TOKEN_ERROR_STATUS,
+  EMBED_TOKEN_INVALID_REASONS,
+  EMBED_TOKEN_MESSAGE,
+  EMBED_TOKEN_PREFIX,
+  EMBED_TOKEN_REFRESH_MESSAGE,
+  EMBED_TOKEN_SCOPES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS,
@@ -2524,6 +2605,12 @@ export {
   createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
+  embedTokenMintRequestSchema,
+  embedTokenMintResponseSchema,
+  embedTokenVerifyInvalidSchema,
+  embedTokenVerifyRequestSchema,
+  embedTokenVerifyResponseSchema,
+  embedTokenVerifyValidSchema,
   extraMlosExceedQuantityErrorSchema,
   feeChangedConflict,
   feeNotFound,
@@ -2568,6 +2655,7 @@ export {
   teamMemberCreateRequestSchema,
   teamMemberRemoveRequestSchema,
   teamMemberSignInLinkRequestSchema,
+  tenantAppAccessResponseSchema,
   tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,

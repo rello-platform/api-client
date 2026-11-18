@@ -26,6 +26,17 @@ __export(index_exports, {
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: () => ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource: () => AdminResource,
   AuthResource: () => AuthResource,
+  EMBED_SESSION_EXPIRED_MESSAGE: () => EMBED_SESSION_EXPIRED_MESSAGE,
+  EMBED_SURFACES: () => EMBED_SURFACES,
+  EMBED_SURFACE_SCOPE: () => EMBED_SURFACE_SCOPE,
+  EMBED_TOKEN_AUDIENCE: () => EMBED_TOKEN_AUDIENCE,
+  EMBED_TOKEN_ERRORS: () => EMBED_TOKEN_ERRORS,
+  EMBED_TOKEN_ERROR_STATUS: () => EMBED_TOKEN_ERROR_STATUS,
+  EMBED_TOKEN_INVALID_REASONS: () => EMBED_TOKEN_INVALID_REASONS,
+  EMBED_TOKEN_MESSAGE: () => EMBED_TOKEN_MESSAGE,
+  EMBED_TOKEN_PREFIX: () => EMBED_TOKEN_PREFIX,
+  EMBED_TOKEN_REFRESH_MESSAGE: () => EMBED_TOKEN_REFRESH_MESSAGE,
+  EMBED_TOKEN_SCOPES: () => EMBED_TOKEN_SCOPES,
   PLAN_SWITCH_ERROR_CODES: () => PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS: () => PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS: () => PREVIEW_STALE_REASONS,
@@ -54,6 +65,12 @@ __export(index_exports, {
   createRelloPermissionSelfCheck: () => createRelloPermissionSelfCheck,
   createServiceBearerGuard: () => createServiceBearerGuard,
   createServiceClient: () => createServiceClient,
+  embedTokenMintRequestSchema: () => embedTokenMintRequestSchema,
+  embedTokenMintResponseSchema: () => embedTokenMintResponseSchema,
+  embedTokenVerifyInvalidSchema: () => embedTokenVerifyInvalidSchema,
+  embedTokenVerifyRequestSchema: () => embedTokenVerifyRequestSchema,
+  embedTokenVerifyResponseSchema: () => embedTokenVerifyResponseSchema,
+  embedTokenVerifyValidSchema: () => embedTokenVerifyValidSchema,
   extraMlosExceedQuantityErrorSchema: () => extraMlosExceedQuantityErrorSchema,
   feeChangedConflict: () => feeChangedConflict,
   feeNotFound: () => feeNotFound,
@@ -98,6 +115,7 @@ __export(index_exports, {
   teamMemberCreateRequestSchema: () => teamMemberCreateRequestSchema,
   teamMemberRemoveRequestSchema: () => teamMemberRemoveRequestSchema,
   teamMemberSignInLinkRequestSchema: () => teamMemberSignInLinkRequestSchema,
+  tenantAppAccessResponseSchema: () => tenantAppAccessResponseSchema,
   tenantCyrStateSchema: () => tenantCyrStateSchema,
   tenantDisablePayloadSchema: () => tenantDisablePayloadSchema,
   tenantEnablePayloadSchema: () => tenantEnablePayloadSchema,
@@ -2590,6 +2608,76 @@ function isMembersExceedQuantityError(e) {
   return membersExceedQuantityErrorSchema.safeParse(e).success;
 }
 
+// src/types/embed-token.ts
+var import_zod5 = require("zod");
+var embedTokenId = import_zod5.z.string().min(1);
+var embedTokenTime = import_zod5.z.iso.datetime({ offset: true });
+var EMBED_SURFACES = ["identity", "rate-widget"];
+var EMBED_TOKEN_SCOPES = ["hs:identity-editor", "hs:rate-widget"];
+var EMBED_SURFACE_SCOPE = Object.freeze({
+  identity: "hs:identity-editor",
+  "rate-widget": "hs:rate-widget"
+});
+var EMBED_TOKEN_AUDIENCE = "home-scout";
+var EMBED_TOKEN_PREFIX = "rpe_";
+var embedTokenScope = import_zod5.z.enum(EMBED_TOKEN_SCOPES);
+var embedTokenMintRequestSchema = import_zod5.z.object({
+  agentId: embedTokenId,
+  surface: import_zod5.z.enum(EMBED_SURFACES)
+}).strict();
+var embedTokenMintResponseSchema = import_zod5.z.object({
+  token: import_zod5.z.string().startsWith(EMBED_TOKEN_PREFIX).min(EMBED_TOKEN_PREFIX.length + 1),
+  /** ISO-8601. */
+  expiresAt: embedTokenTime,
+  audience: import_zod5.z.literal(EMBED_TOKEN_AUDIENCE),
+  scope: embedTokenScope,
+  tenantId: embedTokenId,
+  agentId: embedTokenId
+}).strict();
+var embedTokenVerifyRequestSchema = import_zod5.z.object({
+  token: import_zod5.z.string().min(1)
+}).strict();
+var EMBED_TOKEN_INVALID_REASONS = ["expired", "revoked", "unknown_token"];
+var embedTokenVerifyValidSchema = import_zod5.z.object({
+  valid: import_zod5.z.literal(true),
+  tenantId: embedTokenId,
+  agentId: embedTokenId,
+  scope: embedTokenScope,
+  /** ISO-8601. */
+  expiresAt: embedTokenTime
+}).strict();
+var embedTokenVerifyInvalidSchema = import_zod5.z.object({
+  valid: import_zod5.z.literal(false),
+  reason: import_zod5.z.enum(EMBED_TOKEN_INVALID_REASONS)
+}).strict();
+var embedTokenVerifyResponseSchema = import_zod5.z.discriminatedUnion("valid", [
+  embedTokenVerifyValidSchema,
+  embedTokenVerifyInvalidSchema
+]);
+var tenantAppAccessResponseSchema = import_zod5.z.object({
+  tenantId: embedTokenId,
+  servable: import_zod5.z.boolean()
+}).strict();
+var EMBED_TOKEN_ERRORS = Object.freeze({
+  AGENT_NOT_IN_TENANT: "agent_not_in_tenant",
+  AGENT_INACTIVE: "agent_inactive",
+  HOME_SCOUT_NOT_ENABLED: "home_scout_not_enabled",
+  TENANT_NOT_SERVABLE: "tenant_not_servable",
+  EMBED_TOKEN_UNAVAILABLE: "embed_token_unavailable",
+  TENANT_APP_ACCESS_UNAVAILABLE: "tenant_app_access_unavailable"
+});
+var EMBED_TOKEN_ERROR_STATUS = Object.freeze({
+  agent_not_in_tenant: 404,
+  agent_inactive: 409,
+  home_scout_not_enabled: 409,
+  tenant_not_servable: 409,
+  embed_token_unavailable: 503,
+  tenant_app_access_unavailable: 503
+});
+var EMBED_TOKEN_REFRESH_MESSAGE = "pfp-embed:token-refresh";
+var EMBED_TOKEN_MESSAGE = "pfp-embed:token";
+var EMBED_SESSION_EXPIRED_MESSAGE = "pfp-embed:session-expired";
+
 // src/index.ts
 function createRelloClient(config) {
   return new RelloClient(config);
@@ -2605,6 +2693,17 @@ function createServiceClient(config) {
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   AdminResource,
   AuthResource,
+  EMBED_SESSION_EXPIRED_MESSAGE,
+  EMBED_SURFACES,
+  EMBED_SURFACE_SCOPE,
+  EMBED_TOKEN_AUDIENCE,
+  EMBED_TOKEN_ERRORS,
+  EMBED_TOKEN_ERROR_STATUS,
+  EMBED_TOKEN_INVALID_REASONS,
+  EMBED_TOKEN_MESSAGE,
+  EMBED_TOKEN_PREFIX,
+  EMBED_TOKEN_REFRESH_MESSAGE,
+  EMBED_TOKEN_SCOPES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PREVIEW_STALE_REASONS,
@@ -2633,6 +2732,12 @@ function createServiceClient(config) {
   createRelloPermissionSelfCheck,
   createServiceBearerGuard,
   createServiceClient,
+  embedTokenMintRequestSchema,
+  embedTokenMintResponseSchema,
+  embedTokenVerifyInvalidSchema,
+  embedTokenVerifyRequestSchema,
+  embedTokenVerifyResponseSchema,
+  embedTokenVerifyValidSchema,
   extraMlosExceedQuantityErrorSchema,
   feeChangedConflict,
   feeNotFound,
@@ -2677,6 +2782,7 @@ function createServiceClient(config) {
   teamMemberCreateRequestSchema,
   teamMemberRemoveRequestSchema,
   teamMemberSignInLinkRequestSchema,
+  tenantAppAccessResponseSchema,
   tenantCyrStateSchema,
   tenantDisablePayloadSchema,
   tenantEnablePayloadSchema,

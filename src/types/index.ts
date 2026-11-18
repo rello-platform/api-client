@@ -281,3 +281,38 @@ export type {
   MembersExceedQuantityError,
   AddOnQuantityOtherError,
 } from "./billing-switch.js";
+
+// PFP Gateway P-2: the embed token (mint, verify) and F2 tenant app access
+export {
+  EMBED_SURFACES,
+  EMBED_TOKEN_SCOPES,
+  EMBED_SURFACE_SCOPE,
+  EMBED_TOKEN_AUDIENCE,
+  EMBED_TOKEN_PREFIX,
+  embedTokenMintRequestSchema,
+  embedTokenMintResponseSchema,
+  embedTokenVerifyRequestSchema,
+  EMBED_TOKEN_INVALID_REASONS,
+  embedTokenVerifyValidSchema,
+  embedTokenVerifyInvalidSchema,
+  embedTokenVerifyResponseSchema,
+  tenantAppAccessResponseSchema,
+  EMBED_TOKEN_ERRORS,
+  EMBED_TOKEN_ERROR_STATUS,
+  EMBED_TOKEN_REFRESH_MESSAGE,
+  EMBED_TOKEN_MESSAGE,
+  EMBED_SESSION_EXPIRED_MESSAGE,
+} from "./embed-token.js";
+export type {
+  EmbedSurface,
+  EmbedTokenScope,
+  EmbedTokenMintRequest,
+  EmbedTokenMintResponse,
+  EmbedTokenVerifyRequest,
+  EmbedTokenInvalidReason,
+  EmbedTokenVerifyValid,
+  EmbedTokenVerifyInvalid,
+  EmbedTokenVerifyResponse,
+  TenantAppAccessResponse,
+  EmbedTokenErrorCode,
+} from "./embed-token.js";
