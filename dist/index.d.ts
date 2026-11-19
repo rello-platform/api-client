@@ -845,8 +845,16 @@ type AddOnChargeOnceCharged = z.infer<typeof addOnChargeOnceChargedSchema>;
 type AddOnChargeOnceDeclined = z.infer<typeof addOnChargeOnceDeclinedSchema>;
 type AddOnChargeOnceUnknown = z.infer<typeof addOnChargeOnceUnknownSchema>;
 type AddOnChargeOnceManual = z.infer<typeof addOnChargeOnceManualSchema>;
-/** The refusals the route names today: 409 price_changed | add_on_not_one_time, 404 add_on_not_found. */
-declare const ADD_ON_CHARGE_ONCE_ERROR_CODES: readonly ["price_changed", "add_on_not_one_time", "add_on_not_found"];
+/**
+ * The refusals the route names today (`{ error }` bodies, thrown by the client as RelloError):
+ *   409 price_changed | add_on_not_one_time | add_on_not_priced (a ONE_TIME add-on with no one-time price)
+ *   404 add_on_not_found
+ *   422 request_id_in_use (one request id reused for a different add-on; nothing charged)
+ *   409 request_id_ambiguous (GET only, a rare race)
+ *   503 billing_unavailable (Stripe not configured; nothing claimed; retried by the transport on the same key)
+ * v2.41.0 added the last four.
+ */
+declare const ADD_ON_CHARGE_ONCE_ERROR_CODES: readonly ["price_changed", "add_on_not_one_time", "add_on_not_found", "request_id_in_use", "request_id_ambiguous", "billing_unavailable", "add_on_not_priced"];
 type AddOnChargeOnceErrorCode = (typeof ADD_ON_CHARGE_ONCE_ERROR_CODES)[number];
 /**
  * A refusal body `{ error }`. `error` is a plain string and `.loose()` keeps any extra field, so a

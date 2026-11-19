@@ -903,7 +903,15 @@ var addOnChargeOnceAnswerSchema = z.discriminatedUnion("status", [
   addOnChargeOnceUnknownSchema,
   addOnChargeOnceManualSchema
 ]);
-var ADD_ON_CHARGE_ONCE_ERROR_CODES = ["price_changed", "add_on_not_one_time", "add_on_not_found"];
+var ADD_ON_CHARGE_ONCE_ERROR_CODES = [
+  "price_changed",
+  "add_on_not_one_time",
+  "add_on_not_found",
+  "request_id_in_use",
+  "request_id_ambiguous",
+  "billing_unavailable",
+  "add_on_not_priced"
+];
 var addOnChargeOnceErrorSchema = z.object({ error: z.string().min(1) }).loose();
 
 // src/resources/billing.ts
