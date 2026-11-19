@@ -64,7 +64,7 @@ test("start response: trialId, trialPlanSlug, startedAt, endsAt, integer rev >= 
   assert.equal(s.safeParse({ ...ok, endsAt: "soon" }).success, false);
 });
 
-test("error codes: exactly the nine, no duplicate; each parses; an unlisted code is refused; trial rides on a refusal with its status", () => {
+test("error codes: exactly the nine, no duplicate; each parses; an unlisted code now parses too (1457); trial rides on a refusal with its status", () => {
   const codes = api.PLAN_TRIAL_START_ERROR_CODES;
   assert.ok(Array.isArray(codes), "PLAN_TRIAL_START_ERROR_CODES missing");
   assert.deepEqual([...codes].sort(), [...CODES].sort());
@@ -74,7 +74,7 @@ test("error codes: exactly the nine, no duplicate; each parses; an unlisted code
   const e = api.planTrialStartErrorSchema;
   assert.ok(e, "planTrialStartErrorSchema missing");
   for (const error of codes) assert.equal(e.safeParse({ error }).success, true, error);
-  assert.equal(e.safeParse({ error: "some_later_code" }).success, false, "error is an enum: an unlisted code is not an answer this contract knows");
+  assert.equal(e.safeParse({ error: "some_later_code" }).success, true, "1457: error is an open string like its siblings, so a code Rello adds later still parses (v2.43.0 refused it)");
   assert.equal(e.safeParse({}).success, false);
   assert.equal(e.safeParse({ error: 3 }).success, false);
   const used = e.safeParse({ error: "trial_already_used", trial: { ...STATE, status: "ENDED" } });
