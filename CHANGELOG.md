@@ -6,6 +6,35 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.43.0 — 2026-11-19
+
+### Added — the once-per-tenant Full PFP plan trial (PFP Gateway G-10R-2t-A, ruling K11a)
+
+Platform KA prompt 1451, built to Agent 5's spec (a5-1450 §(b)). Version read at
+2026-11-19: v2.42.0 tagged, no open PR claims v2.43.0 (the only open PR is #10, which
+takes the next free version when it merges). Permission: `billing:plan-trial:write`,
+@rello-platform/permissions v0.67.0. Additive only: no exported name is removed, an old
+body parses unchanged, and an absent `trial` stays absent (never defaulted to `null`).
+
+- `src/types/plan-trial.ts` (new):
+  - `planTrialStateSchema` `{ planSlug, startedAt, endsAt }` (ISO instants with an offset allowed).
+  - `planTrialStartRequestSchema` `{ trialPlanSlug? }`, strict, 1–100 characters when sent. The slug is
+    OPTIONAL (KA amendment 1454: the trial plan is pinned by the pfp-full grant, not by slug), so `{}` parses.
+  - `planTrialStartResponseSchema` `{ trialId, trialPlanSlug, startedAt, endsAt, rev }`, `rev` an integer ≥ 0.
+  - `PLAN_TRIAL_START_ERROR_CODES` (nine codes: `trial_already_used`, `already_entitled`,
+    `not_gateway_tenant`, `switch_in_progress`, `switch_not_allowed`, `unknown_trial_plan` (400: the slug
+    sent does not match), `trial_plan_unknown` (409: zero or several Plans carry the pfp-full grant, so the
+    server cannot tell which is Full; amendment 1454), `invalid_body`, `plan_trial_unavailable`) and `planTrialStartErrorSchema`
+    `{ error, trial? }`, loose. `error` is an enum: an unlisted code does not parse and
+    must be treated as unreadable (unknown), never as "no trial". `trial` carries its `status`.
+  - Types `PlanTrialState`, `PlanTrialStartRequest`, `PlanTrialStartResponse`,
+    `PlanTrialStartErrorCode`, `PlanTrialStartError`.
+- `trial: planTrialStateSchema.nullable().optional()` on `planGrantsReadResponseSchema` and on
+  `tenantPlanGrantsSchema` (the `plan_grants_changed` data). `null` = no trial; absent = an older
+  Rello that does not say.
+- Re-exported through `src/types/index.ts` and `src/index.ts`.
+- Test `tests/plan-trial-1451.test.mjs`.
+
 ## v2.42.0 — 2026-11-19
 
 ### Added — keep Refi Radar through a plan switch (PFP gateway G-10R-2b, K1)

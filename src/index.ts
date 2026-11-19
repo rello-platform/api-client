@@ -370,6 +370,22 @@ export type {
   AddOnChargeOnceError,
 } from "./types/index.js";
 
+// PFP Gateway G-10R-2t-A: the once-per-tenant Full PFP plan trial (KA prompt 1451)
+export {
+  planTrialStateSchema,
+  planTrialStartRequestSchema,
+  planTrialStartResponseSchema,
+  PLAN_TRIAL_START_ERROR_CODES,
+  planTrialStartErrorSchema,
+} from "./types/index.js";
+export type {
+  PlanTrialState,
+  PlanTrialStartRequest,
+  PlanTrialStartResponse,
+  PlanTrialStartErrorCode,
+  PlanTrialStartError,
+} from "./types/index.js";
+
 // PFP Gateway P-2: the embed token (mint, verify) and F2 tenant app access
 export {
   EMBED_SURFACES,

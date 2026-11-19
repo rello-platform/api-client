@@ -16,6 +16,7 @@
  */
 
 import { z } from "zod";
+import { planTrialStateSchema } from "./plan-trial.js";
 
 // ---------------------------------------------------------------------------
 // Agent shape (shared between tenant-enable and agent-provision payloads)
@@ -144,6 +145,9 @@ export const tenantPlanGrantsSchema = z.object({
   // a plan switch; absent = any other change. A plain string, never an enum, so
   // a later cause value never makes an older receiver refuse the push.
   cause: z.string().optional(),
+  // PFP Gateway G-10R-2t-A (v2.43.0): the tenant's Full PFP plan trial. null = no trial;
+  // ABSENT = an older Rello that does not say (unknown). Never defaulted to null.
+  trial: planTrialStateSchema.nullable().optional(),
 });
 
 export type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
