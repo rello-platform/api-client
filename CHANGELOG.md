@@ -6,6 +6,37 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.40.0 — 2026-11-19
+
+### Added — the one-time add-on charge (PFP Gateway "Match my design")
+
+Platform KA prompt 1419 (Kelly D55: a $99 one-time charge per request). Version
+read at 2026-11-19: v2.39.0 tagged, no open PR claims v2.40.0. Permission:
+`billing:addon-charge:write`, @rello-platform/permissions v0.66.0. Rello's route
+is built separately; this is the contract it and PathfinderPro import.
+
+- `src/types/addon-charge-once.ts`: `POST` and `GET /api/v1/billing/add-on/charge-once`.
+  - `addOnChargeOnceRequestSchema` (strict `{ addOnId, quoteCents }`, integer cents >= 0),
+    `addOnChargeOnceRequestIdSchema` (8–128 chars; the idempotency key; one charge per
+    request id), `addOnChargeOnceQuerySchema` (`{ requestId }`).
+  - `addOnChargeOnceAnswerSchema`, discriminated on `status`: `charged`
+    `{ chargeId, amountCents, paidAt }` (200), `declined` `{ message }` (402), `unknown`
+    `{ chargeId }` (202: never charge again, read by request id), `manual`
+    `{ reason: "no_stripe_customer" | "no_payment_method" }` (200: nothing charged).
+  - `addOnChargeOnceErrorSchema` (`{ error }`, `.loose()`) and
+    `ADD_ON_CHARGE_ONCE_ERROR_CODES` (409 `price_changed` | `add_on_not_one_time`, 404
+    `add_on_not_found`).
+  - `ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER` is "X-Idempotency-Key", the name Rello's
+    other v1 billing mutations read; the client also sends "Idempotency-Key"
+    (`ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS`) with the same value.
+- `BillingResource.chargeOneTimeAddOn(tenantId, { addOnId, quoteCents }, requestId)` and
+  `getOneTimeAddOnCharge(tenantId, requestId)`: validate before sending, return the answer
+  (a 402 `declined` is returned, not thrown), throw the existing RelloError family for 409 /
+  404 / 400 / 401 / 403 / 5xx, and throw a RelloError, never an answer, for a body that is not
+  one of the four. A throw after the request left the process is unknown, not "not charged":
+  read by the same request id.
+- Additive only: no existing export, type, method or version line changed.
+
 ## v2.39.0 — 2026-11-18
 
 The next minor after v2.38.0 (#19, P-2), set by Platform KA prompt 1335. Built

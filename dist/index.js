@@ -866,6 +866,46 @@ var SettingsResource = class {
   }
 };
 
+// src/types/addon-charge-once.ts
+import { z } from "zod";
+var ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+var ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS = "Idempotency-Key";
+var addOnChargeOnceRequestIdSchema = z.string().trim().min(8).max(128);
+var addOnChargeOnceRequestSchema = z.object({
+  addOnId: z.string().min(1),
+  /** The one-time price the caller showed, integer cents (>= 0). Never charged; only compared. */
+  quoteCents: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+}).strict();
+var addOnChargeOnceQuerySchema = z.object({ requestId: addOnChargeOnceRequestIdSchema }).strict();
+var cents = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+var addOnChargeOnceChargedSchema = z.object({
+  status: z.literal("charged"),
+  chargeId: z.string().min(1),
+  amountCents: cents,
+  paidAt: z.string().datetime({ offset: true })
+});
+var addOnChargeOnceDeclinedSchema = z.object({
+  status: z.literal("declined"),
+  message: z.string()
+});
+var addOnChargeOnceUnknownSchema = z.object({
+  status: z.literal("unknown"),
+  chargeId: z.string().min(1)
+});
+var ADD_ON_CHARGE_ONCE_MANUAL_REASONS = ["no_stripe_customer", "no_payment_method"];
+var addOnChargeOnceManualSchema = z.object({
+  status: z.literal("manual"),
+  reason: z.enum(ADD_ON_CHARGE_ONCE_MANUAL_REASONS)
+});
+var addOnChargeOnceAnswerSchema = z.discriminatedUnion("status", [
+  addOnChargeOnceChargedSchema,
+  addOnChargeOnceDeclinedSchema,
+  addOnChargeOnceUnknownSchema,
+  addOnChargeOnceManualSchema
+]);
+var ADD_ON_CHARGE_ONCE_ERROR_CODES = ["price_changed", "add_on_not_one_time", "add_on_not_found"];
+var addOnChargeOnceErrorSchema = z.object({ error: z.string().min(1) }).loose();
+
 // src/resources/billing.ts
 var BillingResource = class {
   constructor(transport) {
@@ -897,7 +937,82 @@ var BillingResource = class {
       { app: appSlug }
     );
   }
+  /**
+   * Charge ONE one-time add-on to the tenant's saved card, once per `requestId` (PFP Gateway "Match
+   * my design"; contract and answers in ../types/addon-charge-once.ts).
+   *
+   * Resolves with the answer: `charged` (200), `manual` (200), `unknown` (202) or `declined` (402; an
+   * answer, not an error). Throws on everything else: RelloError 409 (`price_changed` |
+   * `add_on_not_one_time`; parse `err.body` with addOnChargeOnceErrorSchema), RelloNotFoundError 404
+   * (`add_on_not_found`), RelloValidationError / RelloAuthError / RelloForbiddenError, and
+   * RelloUnavailableError or RelloError 5xx when the request failed in flight.
+   *
+   * ⚠ A throw from a request that left the process (timeout, network, 5xx) is NOT "not charged":
+   * Rello may have taken the money. Call getOneTimeAddOnCharge with the same `requestId` and never
+   * charge under a new one. A 200/202/402 body this client cannot read is thrown as a RelloError
+   * carrying that status, never returned as an answer.
+   *
+   * The same `requestId` is sent on every transport retry, so a retried POST is the same charge.
+   */
+  async chargeOneTimeAddOn(tenantId, input, requestId) {
+    const path = "/billing/add-on/charge-once";
+    const body = addOnChargeOnceRequestSchema.safeParse(input);
+    const key = addOnChargeOnceRequestIdSchema.safeParse(requestId);
+    if (!body.success || !key.success) {
+      throw new RelloValidationError(path, null, {
+        error: "invalid_request",
+        issues: [...body.success ? [] : body.error.issues, ...key.success ? [] : key.error.issues]
+      });
+    }
+    let raw;
+    try {
+      raw = await this.transport.request("POST", path, {
+        tenantId,
+        body: body.data,
+        timeout: "write",
+        headers: {
+          [ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER]: key.data,
+          [ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS]: key.data
+        }
+      });
+    } catch (err) {
+      if (err instanceof RelloError && err.statusCode === 402) {
+        const declined = addOnChargeOnceDeclinedSchema.safeParse(err.body);
+        if (declined.success) return declined.data;
+      }
+      throw err;
+    }
+    return parseAnswer(raw, path, 200);
+  }
+  /**
+   * The state of a charge by the request id it was made under. Resolves with the same answers as
+   * chargeOneTimeAddOn (a 402 `declined` included). Throws RelloNotFoundError (404) when the
+   * caller's tenant has no charge under that request id.
+   */
+  async getOneTimeAddOnCharge(tenantId, requestId) {
+    const path = "/billing/add-on/charge-once";
+    const query = addOnChargeOnceQuerySchema.safeParse({ requestId });
+    if (!query.success) {
+      throw new RelloValidationError(path, null, { error: "invalid_request", issues: query.error.issues });
+    }
+    let raw;
+    try {
+      raw = await this.transport.get(path, tenantId, { requestId: query.data.requestId });
+    } catch (err) {
+      if (err instanceof RelloError && err.statusCode === 402) {
+        const declined = addOnChargeOnceDeclinedSchema.safeParse(err.body);
+        if (declined.success) return declined.data;
+      }
+      throw err;
+    }
+    return parseAnswer(raw, path, 200);
+  }
 };
+function parseAnswer(raw, path, status) {
+  const parsed = addOnChargeOnceAnswerSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  throw new RelloError(`Unreadable charge-once answer: ${path}`, status, path, null, raw);
+}
 
 // src/resources/communications.ts
 var CommunicationsResource = class {
@@ -1919,169 +2034,169 @@ var PROPERTY_AUTOFILL_FIELD_KEYS = [
 ];
 
 // src/types/provisioning.ts
-import { z } from "zod";
-var provisionedAgentSchema = z.object({
-  relloAgentId: z.string(),
-  email: z.string().email(),
-  firstName: z.string(),
-  lastName: z.string(),
-  slug: z.string(),
-  role: z.string(),
+import { z as z2 } from "zod";
+var provisionedAgentSchema = z2.object({
+  relloAgentId: z2.string(),
+  email: z2.string().email(),
+  firstName: z2.string(),
+  lastName: z2.string(),
+  slug: z2.string(),
+  role: z2.string(),
   // "MLO" | "BROKER" | "AGENT" — kept as string for forward-compat
   // Rello omits an empty phone on the enable push (PFP Gateway A-195); other
   // senders still send null. Accept all three.
-  phone: z.string().nullable().optional(),
+  phone: z2.string().nullable().optional(),
   // Optional profile fields — present when the agent has filled them in
-  photoUrl: z.string().optional(),
-  bio: z.string().optional(),
-  title: z.string().optional(),
-  tagline: z.string().optional(),
-  brokerageName: z.string().optional(),
-  brokerageLogoUrl: z.string().optional(),
-  brokerageLicenseNumber: z.string().optional(),
-  licenseNumber: z.string().optional(),
-  licenseState: z.string().optional(),
-  nmlsNumber: z.string().optional(),
-  websiteUrl: z.string().optional(),
-  applicationUrl: z.string().optional(),
-  social: z.unknown().optional(),
+  photoUrl: z2.string().optional(),
+  bio: z2.string().optional(),
+  title: z2.string().optional(),
+  tagline: z2.string().optional(),
+  brokerageName: z2.string().optional(),
+  brokerageLogoUrl: z2.string().optional(),
+  brokerageLicenseNumber: z2.string().optional(),
+  licenseNumber: z2.string().optional(),
+  licenseState: z2.string().optional(),
+  nmlsNumber: z2.string().optional(),
+  websiteUrl: z2.string().optional(),
+  applicationUrl: z2.string().optional(),
+  social: z2.unknown().optional(),
   // Tenant-owner MLO info — applied to ALL agents in the tenant-enable payload.
   // For solo MLOs this is the agent's own NMLS; for brokerages it's the owner's.
-  mloName: z.string().optional(),
-  mloNmls: z.string().optional(),
+  mloName: z2.string().optional(),
+  mloNmls: z2.string().optional(),
   // PTA-013 F-06: Milo profile + wizard answers per agent in tenant-enable payloads.
   // Present when agent has completed the Rello Start Wizard. Only sent in
   // tenant-enable (bulk) — per-agent provision carries these at the top level.
-  agentProfile: z.lazy(() => agentProfileSchema).optional(),
-  wizardAnswers: z.array(z.lazy(() => wizardAnswerSchema)).optional(),
+  agentProfile: z2.lazy(() => agentProfileSchema).optional(),
+  wizardAnswers: z2.array(z2.lazy(() => wizardAnswerSchema)).optional(),
   // PFP Gateway G-6a-pre (spec §G-8 (a) [B8, K-178]; KA prompts 1105/1106).
   // Optional: absent means the sender did not say, never false.
   // hasLinkedUser — the Rello Agent has a linked User (Agent.userId set).
   //   Home Scout's page editor uses it to say a loan officer needs a Rello
   //   login before their page can own leads. A setup message, never a hold.
-  hasLinkedUser: z.boolean().optional(),
+  hasLinkedUser: z2.boolean().optional(),
   // isTenantOwner — the agent's linked User holds an owner role. PathfinderPro
   //   uses it to pick the account's shared rate source at write time.
-  isTenantOwner: z.boolean().optional(),
+  isTenantOwner: z2.boolean().optional(),
   // PFP Gateway X2a (spec rev 10.30 §6 [D30]; KA prompts 1153/1155).
   // loginless — a D30 extra-signature loan officer: a Rello Agent that never has
   //   a login (Agent.loginless, CHECK-guarded to userId NULL). Rello always sends
   //   it, true or false; absent (an older Rello) is UNKNOWN, never "has a login".
-  loginless: z.boolean().optional()
+  loginless: z2.boolean().optional()
 });
-var tenantEnablePayloadSchema = z.object({
-  action: z.literal("enable"),
-  relloTenantId: z.string(),
-  tenant: z.object({
-    name: z.string(),
-    slug: z.string(),
+var tenantEnablePayloadSchema = z2.object({
+  action: z2.literal("enable"),
+  relloTenantId: z2.string(),
+  tenant: z2.object({
+    name: z2.string(),
+    slug: z2.string(),
     // Omitted on Rello's enable push when the tenant has no logo (A-195).
-    logoUrl: z.string().nullable().optional(),
-    primaryColor: z.string().nullable(),
-    physicalAddress: z.string().nullable(),
-    applicationUrl: z.string().nullable(),
-    type: z.string(),
+    logoUrl: z2.string().nullable().optional(),
+    primaryColor: z2.string().nullable(),
+    physicalAddress: z2.string().nullable(),
+    applicationUrl: z2.string().nullable(),
+    type: z2.string(),
     // Rello TenantType enum
-    plan: z.string(),
+    plan: z2.string(),
     // Rello Plan enum
     // PFP Gateway §4.2 (G-2): "pfp-gateway" for a tenant created by a PFP
     // gateway checkout; null for every other tenant. Sticky once set.
-    billingOrigin: z.string().nullable().optional()
+    billingOrigin: z2.string().nullable().optional()
   }),
-  agents: z.array(provisionedAgentSchema),
+  agents: z2.array(provisionedAgentSchema),
   // PFP Gateway §4.2 (G-2): the tenant's plan grants, from Rello's
   // TenantPlanGrantState. null when the tenant has no grant state. A receiver
   // applies it only when `rev` is newer than the one it holds.
-  planGrants: z.lazy(() => tenantPlanGrantsSchema).nullable().optional(),
+  planGrants: z2.lazy(() => tenantPlanGrantsSchema).nullable().optional(),
   // PFP Gateway §4.2 / §4.3 [A-14] (G-2): the effective Check Your Rate record,
   // the same fields as `billing.addon_changed`. null when the tenant never
   // held it. A receiver applies it only when strictly newer (seq, else occurredAt).
-  cyr: z.lazy(() => tenantCyrStateSchema).nullable().optional(),
+  cyr: z2.lazy(() => tenantCyrStateSchema).nullable().optional(),
   // PFP Gateway G-EXTRAS (PKG-2): every add-on state record the tenant holds
   // (Check Your Rate, Refi Radar, ...), one per featureSlug, same shape as `cyr`.
   // Absent = an older Rello (unknown, never "no add-ons"); none held = [].
-  addOns: z.array(z.lazy(() => tenantCyrStateSchema)).optional(),
+  addOns: z2.array(z2.lazy(() => tenantCyrStateSchema)).optional(),
   // HH-specific: initial credit grant for new tenants. Optional — only
   // sent when the spoke app has a credit system (currently only HH).
   // Spokes without credits ignore this field.
-  creditAllocation: z.object({
-    initialBalance: z.number().optional(),
-    poolSize: z.number().nullable().optional()
+  creditAllocation: z2.object({
+    initialBalance: z2.number().optional(),
+    poolSize: z2.number().nullable().optional()
   }).optional()
 });
-var tenantPlanGrantsSchema = z.object({
+var tenantPlanGrantsSchema = z2.object({
   /** Strictly increasing per tenant; Rello's TenantPlanGrantState.rev. */
-  rev: z.number().int().nonnegative(),
-  grants: z.array(z.string()),
+  rev: z2.number().int().nonnegative(),
+  grants: z2.array(z2.string()),
   // Null for a tenant with no plan (a cancelled tenant: grants [] and planSlug
   // null; KA ruling G-15). Still a required key.
-  planSlug: z.string().nullable(),
+  planSlug: z2.string().nullable(),
   // KA amendment 1109. plan_change = this grant set replaces another because of
   // a plan switch; absent = any other change. A plain string, never an enum, so
   // a later cause value never makes an older receiver refuse the push.
-  cause: z.string().optional()
+  cause: z2.string().optional()
 });
-var tenantCyrStateSchema = z.object({
+var tenantCyrStateSchema = z2.object({
   /** The feature this record is for (a `FEATURE_SLUGS` value, e.g. "check-your-rate"); a plain string so an older slugs release still parses. */
-  featureSlug: z.string().min(1),
-  status: z.enum(["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]),
-  quantity: z.number().int().nonnegative(),
-  trialEndsAt: z.string().nullable(),
-  canceledAt: z.string().nullable(),
+  featureSlug: z2.string().min(1),
+  status: z2.enum(["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED"]),
+  quantity: z2.number().int().nonnegative(),
+  trialEndsAt: z2.string().nullable(),
+  canceledAt: z2.string().nullable(),
   /** ISO with milliseconds. */
-  occurredAt: z.string(),
+  occurredAt: z2.string(),
   /** Strictly increasing integer per (tenant, feature). */
-  seq: z.number().int().nonnegative(),
+  seq: z2.number().int().nonnegative(),
   /** Display only; never used to decide serving. */
-  source: z.enum(["addon", "plan", "both"]),
+  source: z2.enum(["addon", "plan", "both"]),
   /** plan_change = changed because of a plan switch; absent = any other change. A plain string, never an enum. */
-  cause: z.string().optional()
+  cause: z2.string().optional()
 });
-var tenantDisablePayloadSchema = z.object({
-  action: z.literal("disable"),
-  relloTenantId: z.string(),
-  reason: z.string().optional()
+var tenantDisablePayloadSchema = z2.object({
+  action: z2.literal("disable"),
+  relloTenantId: z2.string(),
+  reason: z2.string().optional()
 });
-var tenantProvisioningPayloadSchema = z.discriminatedUnion("action", [
+var tenantProvisioningPayloadSchema = z2.discriminatedUnion("action", [
   tenantEnablePayloadSchema,
   tenantDisablePayloadSchema
 ]);
-var agentProfileSchema = z.object({
-  specialtySentence: z.string().optional(),
-  experienceStatement: z.string().optional(),
-  typicalClient: z.unknown().optional(),
-  areasServed: z.unknown().optional(),
-  designations: z.unknown().optional(),
-  emailTone: z.string().optional(),
-  soloOrTeam: z.string().optional(),
-  preferredContactMethod: z.string().optional(),
-  calendarLink: z.string().optional(),
-  aboutMeFacts: z.unknown().optional(),
-  avoidTopics: z.unknown().optional(),
-  emphasizeTopics: z.unknown().optional(),
-  sensitiveTopics: z.unknown().optional(),
-  introductionDraft: z.string().optional(),
-  signoffStyle: z.string().optional(),
-  successStorySeeds: z.unknown().optional(),
-  sendFrequency: z.string().optional(),
-  newsletterTemplateId: z.string().optional(),
-  brandColors: z.unknown().optional(),
-  leadSourceContext: z.unknown().optional()
+var agentProfileSchema = z2.object({
+  specialtySentence: z2.string().optional(),
+  experienceStatement: z2.string().optional(),
+  typicalClient: z2.unknown().optional(),
+  areasServed: z2.unknown().optional(),
+  designations: z2.unknown().optional(),
+  emailTone: z2.string().optional(),
+  soloOrTeam: z2.string().optional(),
+  preferredContactMethod: z2.string().optional(),
+  calendarLink: z2.string().optional(),
+  aboutMeFacts: z2.unknown().optional(),
+  avoidTopics: z2.unknown().optional(),
+  emphasizeTopics: z2.unknown().optional(),
+  sensitiveTopics: z2.unknown().optional(),
+  introductionDraft: z2.string().optional(),
+  signoffStyle: z2.string().optional(),
+  successStorySeeds: z2.unknown().optional(),
+  sendFrequency: z2.string().optional(),
+  newsletterTemplateId: z2.string().optional(),
+  brandColors: z2.unknown().optional(),
+  leadSourceContext: z2.unknown().optional()
 });
-var wizardAnswerSchema = z.object({
-  questionId: z.string(),
-  question: z.string(),
-  answer: z.unknown()
+var wizardAnswerSchema = z2.object({
+  questionId: z2.string(),
+  question: z2.string(),
+  answer: z2.unknown()
 });
-var agentProvisionPayloadSchema = z.object({
-  action: z.enum(["add", "update", "remove"]),
-  relloTenantId: z.string(),
+var agentProvisionPayloadSchema = z2.object({
+  action: z2.enum(["add", "update", "remove"]),
+  relloTenantId: z2.string(),
   agent: provisionedAgentSchema,
   agentProfile: agentProfileSchema.optional(),
-  wizardAnswers: z.array(wizardAnswerSchema).optional(),
+  wizardAnswers: z2.array(wizardAnswerSchema).optional(),
   // PTA-013 F-05: Tenant physical address sent alongside per-agent sync.
   // CAN-SPAM compliance — spokes persist this on their local Tenant model.
-  physicalAddress: z.unknown().nullable().optional()
+  physicalAddress: z2.unknown().nullable().optional()
 });
 function parseTenantPayload(body) {
   const result = tenantProvisioningPayloadSchema.safeParse(body);
@@ -2101,12 +2216,12 @@ function parseAgentPayload(body) {
 }
 
 // src/types/roster.ts
-import { z as z2 } from "zod";
-var rosterIdField = (name) => z2.string({ error: `${name} is required and must be a string` }).trim().min(1, `${name} is required`).max(128, `${name} is too long`);
-var rosterNameField = (name) => z2.string({ error: `${name} is required and must be a string` }).trim().min(1, `${name} is required`).max(100, `${name} is too long`);
-var rosterEmailField = z2.string({ error: "email is required and must be a string" }).trim().toLowerCase().max(254, "email is too long").pipe(z2.email("email is not a valid address"));
-var rosterRequestIdField = z2.string({ error: "requestId is required and must be a string" }).trim().min(8, "requestId must be 8 to 200 characters").max(200, "requestId must be 8 to 200 characters");
-var loginlessAgentCreateRequestSchema = z2.object({
+import { z as z3 } from "zod";
+var rosterIdField = (name) => z3.string({ error: `${name} is required and must be a string` }).trim().min(1, `${name} is required`).max(128, `${name} is too long`);
+var rosterNameField = (name) => z3.string({ error: `${name} is required and must be a string` }).trim().min(1, `${name} is required`).max(100, `${name} is too long`);
+var rosterEmailField = z3.string({ error: "email is required and must be a string" }).trim().toLowerCase().max(254, "email is too long").pipe(z3.email("email is not a valid address"));
+var rosterRequestIdField = z3.string({ error: "requestId is required and must be a string" }).trim().min(8, "requestId must be 8 to 200 characters").max(200, "requestId must be 8 to 200 characters");
+var loginlessAgentCreateRequestSchema = z3.object({
   tenantId: rosterIdField("tenantId"),
   actingRelloUserId: rosterIdField("actingRelloUserId"),
   firstName: rosterNameField("firstName"),
@@ -2114,8 +2229,8 @@ var loginlessAgentCreateRequestSchema = z2.object({
   email: rosterEmailField,
   requestId: rosterRequestIdField
 }).strict();
-var loginlessAgentRemoveRequestSchema = z2.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
-var teamMemberCreateRequestSchema = z2.object({
+var loginlessAgentRemoveRequestSchema = z3.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamMemberCreateRequestSchema = z3.object({
   tenantId: rosterIdField("tenantId"),
   actingRelloUserId: rosterIdField("actingRelloUserId"),
   email: rosterEmailField,
@@ -2123,13 +2238,13 @@ var teamMemberCreateRequestSchema = z2.object({
   lastName: rosterNameField("lastName"),
   requestId: rosterRequestIdField
 }).strict();
-var teamMemberSignInLinkRequestSchema = z2.object({
+var teamMemberSignInLinkRequestSchema = z3.object({
   tenantId: rosterIdField("tenantId"),
   actingRelloUserId: rosterIdField("actingRelloUserId"),
   requestId: rosterRequestIdField
 }).strict();
-var teamMemberRemoveRequestSchema = z2.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
-var teamLoginRosterQuerySchema = z2.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamMemberRemoveRequestSchema = z3.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
+var teamLoginRosterQuerySchema = z3.object({ tenantId: rosterIdField("tenantId"), actingRelloUserId: rosterIdField("actingRelloUserId") }).strict();
 var ROSTER_ERROR_CODES = [
   "invalid_body",
   // 400
@@ -2168,147 +2283,147 @@ var ROSTER_ERROR_CODES = [
   "internal_error"
   // 500: nothing was saved; try again
 ];
-var loginlessAgentCreateResponseSchema = z2.object({
-  relloAgentId: z2.string().min(1),
-  slug: z2.string().min(1),
-  email: z2.string().min(1),
-  replayed: z2.boolean()
+var loginlessAgentCreateResponseSchema = z3.object({
+  relloAgentId: z3.string().min(1),
+  slug: z3.string().min(1),
+  email: z3.string().min(1),
+  replayed: z3.boolean()
 });
-var loginlessAgentRemoveResponseSchema = z2.object({
-  relloAgentId: z2.string().min(1),
-  status: z2.literal("INACTIVE"),
-  alreadyInactive: z2.boolean()
+var loginlessAgentRemoveResponseSchema = z3.object({
+  relloAgentId: z3.string().min(1),
+  status: z3.literal("INACTIVE"),
+  alreadyInactive: z3.boolean()
 });
-var teamMemberCreateResponseSchema = z2.object({
-  userId: z2.string().min(1),
-  relloAgentId: z2.string().min(1),
-  email: z2.string().min(1),
-  signInEmail: z2.literal("queued"),
-  replayed: z2.boolean()
+var teamMemberCreateResponseSchema = z3.object({
+  userId: z3.string().min(1),
+  relloAgentId: z3.string().min(1),
+  email: z3.string().min(1),
+  signInEmail: z3.literal("queued"),
+  replayed: z3.boolean()
 });
-var teamMemberSignInLinkResponseSchema = z2.object({
-  userId: z2.string().min(1),
-  signInEmail: z2.literal("queued"),
-  replayed: z2.boolean()
+var teamMemberSignInLinkResponseSchema = z3.object({
+  userId: z3.string().min(1),
+  signInEmail: z3.literal("queued"),
+  replayed: z3.boolean()
 });
-var teamMemberRemoveResponseSchema = z2.object({
-  userId: z2.string().min(1),
-  isActive: z2.literal(false),
-  alreadyInactive: z2.boolean()
+var teamMemberRemoveResponseSchema = z3.object({
+  userId: z3.string().min(1),
+  isActive: z3.literal(false),
+  alreadyInactive: z3.boolean()
 });
-var rosterCount = z2.number().int().nonnegative();
-var teamLoginRosterMemberSchema = z2.object({
-  userId: z2.string().min(1),
-  relloAgentId: z2.string().min(1).nullable(),
-  email: z2.string(),
-  firstName: z2.string(),
-  lastName: z2.string(),
-  role: z2.string(),
-  isOwner: z2.boolean()
+var rosterCount = z3.number().int().nonnegative();
+var teamLoginRosterMemberSchema = z3.object({
+  userId: z3.string().min(1),
+  relloAgentId: z3.string().min(1).nullable(),
+  email: z3.string(),
+  firstName: z3.string(),
+  lastName: z3.string(),
+  role: z3.string(),
+  isOwner: z3.boolean()
 });
-var teamLoginRosterResponseSchema = z2.object({
+var teamLoginRosterResponseSchema = z3.object({
   included: rosterCount.nullable(),
   purchased: rosterCount,
   capacity: rosterCount.nullable(),
   members: rosterCount,
   overBy: rosterCount,
-  addOnCatalogKey: z2.literal("pfp-extra-team-login"),
-  people: z2.array(teamLoginRosterMemberSchema)
+  addOnCatalogKey: z3.literal("pfp-extra-team-login"),
+  people: z3.array(teamLoginRosterMemberSchema)
 }).refine((r) => r.included === null === (r.capacity === null), {
   message: "included and capacity are null together"
 });
-var rosterErrorSchema = z2.object({
-  code: z2.string().min(1),
+var rosterErrorSchema = z3.object({
+  code: z3.string().min(1),
   /** For a person. */
-  error: z2.string()
+  error: z3.string()
 }).loose();
 function isRosterErrorCode(code) {
   return typeof code === "string" && ROSTER_ERROR_CODES.includes(code);
 }
-var signatureQuantityNeededSchema = z2.object({
-  code: z2.literal("signature_quantity_needed"),
-  error: z2.string(),
+var signatureQuantityNeededSchema = z3.object({
+  code: z3.literal("signature_quantity_needed"),
+  error: z3.string(),
   purchased: rosterCount,
   extras: rosterCount,
-  addOnCatalogKey: z2.literal("pfp-extra-signature")
+  addOnCatalogKey: z3.literal("pfp-extra-signature")
 });
-var alreadyMemberSchema = z2.object({
-  code: z2.literal("already_member"),
-  error: z2.string(),
-  userId: z2.string().min(1),
-  isActive: z2.boolean()
+var alreadyMemberSchema = z3.object({
+  code: z3.literal("already_member"),
+  error: z3.string(),
+  userId: z3.string().min(1),
+  isActive: z3.boolean()
 });
-var loginQuantityNeededSchema = z2.object({
-  code: z2.literal("login_quantity_needed"),
-  error: z2.string(),
+var loginQuantityNeededSchema = z3.object({
+  code: z3.literal("login_quantity_needed"),
+  error: z3.string(),
   included: rosterCount,
   purchased: rosterCount,
   members: rosterCount,
-  addOnCatalogKey: z2.literal("pfp-extra-team-login")
+  addOnCatalogKey: z3.literal("pfp-extra-team-login")
 });
 
 // src/types/sms-setup.ts
-import { z as z3 } from "zod";
-var smsSetupId = z3.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
-var smsSetupSlug = z3.string().min(1).max(64).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
-var smsSetupTime = z3.iso.datetime({ offset: true });
-var smsSetupRev = z3.number().int().min(1);
-var quoteVersion = z3.number().int().min(1);
-var setupChargeRequest = z3.strictObject({
+import { z as z4 } from "zod";
+var smsSetupId = z4.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+var smsSetupSlug = z4.string().min(1).max(64).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+var smsSetupTime = z4.iso.datetime({ offset: true });
+var smsSetupRev = z4.number().int().min(1);
+var quoteVersion = z4.number().int().min(1);
+var setupChargeRequest = z4.strictObject({
   tenantId: smsSetupId,
   relloAgentId: smsSetupId,
   feeSlug: smsSetupSlug,
   quoteVersion
 });
-var setupChargeStatus = z3.enum(["pending", "paid", "failed", "unknown", "manual", "refunded", "voided"]);
-var setupChargeEnvelope = z3.strictObject({
+var setupChargeStatus = z4.enum(["pending", "paid", "failed", "unknown", "manual", "refunded", "voided"]);
+var setupChargeEnvelope = z4.strictObject({
   tenantId: smsSetupId,
   relloAgentId: smsSetupId,
   feeSlug: smsSetupSlug,
   status: setupChargeStatus,
   /** true only when a PAID row is asked again. */
-  alreadyPaid: z3.boolean().optional(),
+  alreadyPaid: z4.boolean().optional(),
   /** failed: Stripe's decline message (never card data); manual: the reason in words. */
-  message: z3.string().max(500).optional(),
-  chargeId: z3.string().nullable(),
+  message: z4.string().max(500).optional(),
+  chargeId: z4.string().nullable(),
   rev: smsSetupRev,
   /** Display only; order by `rev`. */
   occurredAt: smsSetupTime
 });
-var chargeConflict = z3.strictObject({
-  error: z3.enum(["registration_rejected", "refund_in_progress", "business_suspended", "business_suspension_final"]),
+var chargeConflict = z4.strictObject({
+  error: z4.enum(["registration_rejected", "refund_in_progress", "business_suspended", "business_suspension_final"]),
   envelope: setupChargeEnvelope.nullable()
 });
-var feeSlugQuery = z3.strictObject({ feeSlug: smsSetupSlug });
-var oneTimeFeeQuote = z3.strictObject({
+var feeSlugQuery = z4.strictObject({ feeSlug: smsSetupSlug });
+var oneTimeFeeQuote = z4.strictObject({
   feeSlug: smsSetupSlug,
-  label: z3.string().min(1).max(120),
-  amountCents: z3.number().int().positive(),
-  currency: z3.string().regex(/^[a-z]{3}$/),
-  isActive: z3.boolean(),
+  label: z4.string().min(1).max(120),
+  amountCents: z4.number().int().positive(),
+  currency: z4.string().regex(/^[a-z]{3}$/),
+  isActive: z4.boolean(),
   quoteVersion
 });
-var feeChangedConflict = z3.strictObject({ error: z3.literal("fee_changed"), quote: oneTimeFeeQuote });
-var feeNotFound = z3.strictObject({ error: z3.literal("fee_not_found") });
-var internalError = z3.strictObject({ error: z3.string().min(1), requestId: z3.string().min(1) });
-var smsSetupE164Us = z3.string().regex(/^\+1[2-9]\d{9}$/, "Use a US number like +18015550101");
-var smsSetupEmail = z3.email().max(254);
-var smsSetupAddress = z3.strictObject({
-  street: z3.string().min(1).max(100),
-  street2: z3.string().max(100).optional(),
-  city: z3.string().min(1).max(60),
-  region: z3.string().regex(/^[A-Z]{2}$/, "Use the 2-letter state"),
-  postalCode: z3.string().regex(/^\d{5}(-\d{4})?$/),
-  country: z3.literal("US")
+var feeChangedConflict = z4.strictObject({ error: z4.literal("fee_changed"), quote: oneTimeFeeQuote });
+var feeNotFound = z4.strictObject({ error: z4.literal("fee_not_found") });
+var internalError = z4.strictObject({ error: z4.string().min(1), requestId: z4.string().min(1) });
+var smsSetupE164Us = z4.string().regex(/^\+1[2-9]\d{9}$/, "Use a US number like +18015550101");
+var smsSetupEmail = z4.email().max(254);
+var smsSetupAddress = z4.strictObject({
+  street: z4.string().min(1).max(100),
+  street2: z4.string().max(100).optional(),
+  city: z4.string().min(1).max(60),
+  region: z4.string().regex(/^[A-Z]{2}$/, "Use the 2-letter state"),
+  postalCode: z4.string().regex(/^\d{5}(-\d{4})?$/),
+  country: z4.literal("US")
 });
-var businessType = z3.enum([
+var businessType = z4.enum([
   "Co-operative",
   "Corporation",
   "Limited Liability Corporation",
   "Non-profit Corporation",
   "Partnership"
 ]);
-var businessIndustry = z3.enum([
+var businessIndustry = z4.enum([
   "AGRICULTURE",
   "AUTOMOTIVE",
   "BANKING",
@@ -2343,41 +2458,41 @@ var businessIndustry = z3.enum([
   "TRANSPORTATION",
   "TRAVEL"
 ]);
-var smsSetupBusiness = z3.strictObject({
+var smsSetupBusiness = z4.strictObject({
   /** Exactly as on the IRS CP 575. */
-  legalName: z3.string().min(2).max(255),
+  legalName: z4.string().min(2).max(255),
   businessType,
   industry: businessIndustry,
-  ein: z3.string().regex(/^\d{2}-\d{7}$/, "EIN must look like 12-3456789"),
-  websiteUrl: z3.url().max(255).refine((u) => u.startsWith("https://"), "The website must start with https://"),
-  companyType: z3.enum(["private", "public", "non-profit"]),
-  stockExchange: z3.string().min(1).max(20).optional(),
-  stockTicker: z3.string().min(1).max(10).optional(),
+  ein: z4.string().regex(/^\d{2}-\d{7}$/, "EIN must look like 12-3456789"),
+  websiteUrl: z4.url().max(255).refine((u) => u.startsWith("https://"), "The website must start with https://"),
+  companyType: z4.enum(["private", "public", "non-profit"]),
+  stockExchange: z4.string().min(1).max(20).optional(),
+  stockTicker: z4.string().min(1).max(10).optional(),
   brandContactEmail: smsSetupEmail.optional(),
   address: smsSetupAddress
 });
-var smsSetupAuthorizedRep = z3.strictObject({
-  firstName: z3.string().min(1).max(50),
-  lastName: z3.string().min(1).max(50),
-  businessTitle: z3.string().min(1).max(60),
-  jobPosition: z3.enum(["Director", "GM", "VP", "CEO", "CFO", "General Counsel", "Other"]),
+var smsSetupAuthorizedRep = z4.strictObject({
+  firstName: z4.string().min(1).max(50),
+  lastName: z4.string().min(1).max(50),
+  businessTitle: z4.string().min(1).max(60),
+  jobPosition: z4.enum(["Director", "GM", "VP", "CEO", "CFO", "General Counsel", "Other"]),
   phone: smsSetupE164Us,
   email: smsSetupEmail
 });
-var smsSetupSoleProprietor = z3.strictObject({
-  firstName: z3.string().min(1).max(50),
-  lastName: z3.string().min(1).max(50),
-  brandName: z3.string().min(2).max(255),
+var smsSetupSoleProprietor = z4.strictObject({
+  firstName: z4.string().min(1).max(50),
+  lastName: z4.string().min(1).max(50),
+  brandName: z4.string().min(2).max(255),
   email: smsSetupEmail,
   phone: smsSetupE164Us,
   /** Receives Twilio's YES text; can't be a Twilio/CPaaS number; ≤ 3 uses across TCR. */
   mobilePhone: smsSetupE164Us,
   address: smsSetupAddress
 });
-var smsRegistrationRequest = z3.strictObject({
+var smsRegistrationRequest = z4.strictObject({
   tenantId: smsSetupId,
   relloAgentId: smsSetupId,
-  brandType: z3.enum(["STANDARD", "SOLE_PROPRIETOR"]),
+  brandType: z4.enum(["STANDARD", "SOLE_PROPRIETOR"]),
   business: smsSetupBusiness.optional(),
   authorizedRep: smsSetupAuthorizedRep.optional(),
   soleProprietor: smsSetupSoleProprietor.optional()
@@ -2395,8 +2510,8 @@ var smsRegistrationRequest = z3.strictObject({
     if (!b.soleProprietor) issue(["soleProprietor"], "Sole-proprietor details are required");
   }
 });
-var smsOtpRequest = z3.strictObject({ tenantId: smsSetupId, relloAgentId: smsSetupId });
-var smsRegistrationStatus = z3.enum([
+var smsOtpRequest = z4.strictObject({ tenantId: smsSetupId, relloAgentId: smsSetupId });
+var smsRegistrationStatus = z4.enum([
   "details_received",
   "payment_pending",
   "submitted",
@@ -2411,57 +2526,57 @@ var smsRegistrationStatus = z3.enum([
   "rejected",
   "refunded"
 ]);
-var smsRegistrationEnvelope = z3.strictObject({
+var smsRegistrationEnvelope = z4.strictObject({
   tenantId: smsSetupId,
   relloAgentId: smsSetupId,
-  brandType: z3.enum(["STANDARD", "SOLE_PROPRIETOR"]),
+  brandType: z4.enum(["STANDARD", "SOLE_PROPRIETOR"]),
   status: smsRegistrationStatus,
   /** Twilio's code + text, sanitized. */
-  reason: z3.string().max(1e3).nullable(),
-  fieldsToFix: z3.array(z3.string()).nullable(),
+  reason: z4.string().max(1e3).nullable(),
+  fieldsToFix: z4.array(z4.string()).nullable(),
   /** STANDARD: 3 − the BUSINESS's used count (shared by the team); SOLE_PROPRIETOR: null. */
-  remainingFreeUpdates: z3.number().int().min(0).max(3).nullable(),
+  remainingFreeUpdates: z4.number().int().min(0).max(3).nullable(),
   /** Only when `live`. */
-  phoneNumber: z3.string().regex(/^\+1\d{10}$/).nullable(),
+  phoneNumber: z4.string().regex(/^\+1\d{10}$/).nullable(),
   /** Only for SOLE_PROPRIETOR. Expires 24 h after; a new code is available 60 s after. */
   otpSentAt: smsSetupTime.nullable(),
   rev: smsSetupRev,
   occurredAt: smsSetupTime
 });
-var registrationConflict = z3.strictObject({
-  error: z3.enum(["business_rejected", "business_suspended", "business_suspension_final", "in_review", "no_free_updates", "not_otp_pending"]),
+var registrationConflict = z4.strictObject({
+  error: z4.enum(["business_rejected", "business_suspended", "business_suspension_final", "in_review", "no_free_updates", "not_otp_pending"]),
   envelope: smsRegistrationEnvelope.nullable()
 });
-var setupChargeChangedEvent = z3.strictObject({
-  id: z3.uuid(),
-  type: z3.literal("billing.setup_charge_changed"),
+var setupChargeChangedEvent = z4.strictObject({
+  id: z4.uuid(),
+  type: z4.literal("billing.setup_charge_changed"),
   tenantId: smsSetupId,
   occurredAt: smsSetupTime,
   data: setupChargeEnvelope
 });
-var smsRegistrationChangedEvent = z3.strictObject({
-  id: z3.uuid(),
-  type: z3.literal("sms.registration_changed"),
+var smsRegistrationChangedEvent = z4.strictObject({
+  id: z4.uuid(),
+  type: z4.literal("sms.registration_changed"),
   tenantId: smsSetupId,
   occurredAt: smsSetupTime,
   data: smsRegistrationEnvelope
 });
 
 // src/types/billing-switch.ts
-import { z as z4 } from "zod";
+import { z as z5 } from "zod";
 var PLAN_SWITCH_INTERVALS = ["month", "year"];
-var intervalField = z4.enum(PLAN_SWITCH_INTERVALS);
-var planSwitchPreviewQuerySchema = z4.object({
-  targetPlanSlug: z4.string().trim().min(1),
+var intervalField = z5.enum(PLAN_SWITCH_INTERVALS);
+var planSwitchPreviewQuerySchema = z5.object({
+  targetPlanSlug: z5.string().trim().min(1),
   interval: intervalField.optional()
 }).strict();
-var planSwitchRequestSchema = z4.object({
-  targetPlanSlug: z4.string().min(1),
+var planSwitchRequestSchema = z5.object({
+  targetPlanSlug: z5.string().min(1),
   /** Absent = the current interval. */
   interval: intervalField.optional(),
-  idempotencyKey: z4.string().min(8).max(200),
-  previewId: z4.string().min(1).optional(),
-  confirmedChargeChange: z4.unknown().optional()
+  idempotencyKey: z5.string().min(8).max(200),
+  previewId: z5.string().min(1).optional(),
+  confirmedChargeChange: z5.unknown().optional()
 }).strict();
 var PLAN_SWITCH_ERROR_CODES = [
   "invalid_body",
@@ -2484,86 +2599,86 @@ var PLAN_SWITCH_ERROR_CODES = [
   "operation_not_found"
 ];
 var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"];
-var previewStaleErrorSchema = z4.object({
-  error: z4.literal("preview_stale"),
-  reason: z4.string().optional()
+var previewStaleErrorSchema = z5.object({
+  error: z5.literal("preview_stale"),
+  reason: z5.string().optional()
 });
-var membersExceedTargetErrorSchema = z4.object({
-  error: z4.literal("members_exceed_target"),
-  activeMembers: z4.number().int().nonnegative(),
-  targetLimit: z4.number().int().nonnegative(),
+var membersExceedTargetErrorSchema = z5.object({
+  error: z5.literal("members_exceed_target"),
+  activeMembers: z5.number().int().nonnegative(),
+  targetLimit: z5.number().int().nonnegative(),
   /** For a person, as on every other plan-switch refusal. */
-  message: z4.string().optional()
+  message: z5.string().optional()
 }).strict();
-var isoInstant = z4.string().min(1);
-var minorAmount = z4.number().int();
-var planSwitchPreviewLineSchema = z4.object({
-  description: z4.string(),
+var isoInstant = z5.string().min(1);
+var minorAmount = z5.number().int();
+var planSwitchPreviewLineSchema = z5.object({
+  description: z5.string(),
   amount: minorAmount,
-  currency: z4.string().min(1),
-  period: z4.object({ start: isoInstant, end: isoInstant }),
-  proration: z4.boolean()
+  currency: z5.string().min(1),
+  period: z5.object({ start: isoInstant, end: isoInstant }),
+  proration: z5.boolean()
 });
-var planSwitchPreviewSubscriptionSchema = z4.object({
-  kind: z4.enum(["plan", "addon"]),
-  lines: z4.array(planSwitchPreviewLineSchema),
+var planSwitchPreviewSubscriptionSchema = z5.object({
+  kind: z5.enum(["plan", "addon"]),
+  lines: z5.array(planSwitchPreviewLineSchema),
   total: minorAmount
 });
-var planSwitchPreviewResponseSchema = z4.object({
-  previewId: z4.string().min(1),
+var planSwitchPreviewResponseSchema = z5.object({
+  previewId: z5.string().min(1),
   expiresAt: isoInstant,
   prorationDate: isoInstant,
-  requiresConfirmation: z4.boolean(),
-  subscriptions: z4.array(planSwitchPreviewSubscriptionSchema),
-  planChange: z4.object({
-    from: z4.string().min(1),
-    to: z4.string().min(1),
+  requiresConfirmation: z5.boolean(),
+  subscriptions: z5.array(planSwitchPreviewSubscriptionSchema),
+  planChange: z5.object({
+    from: z5.string().min(1),
+    to: z5.string().min(1),
     fromInterval: intervalField,
     toInterval: intervalField
   }),
-  chargeChange: z4.object({ carriedCheckYourRateSeat: z4.boolean(), refiRadarDrops: z4.boolean() })
+  chargeChange: z5.object({ carriedCheckYourRateSeat: z5.boolean(), refiRadarDrops: z5.boolean() })
 });
-var planSwitchStepSchema = z4.object({
-  index: z4.number().int().nonnegative(),
-  kind: z4.string().min(1),
-  state: z4.enum(["PENDING", "IN_FLIGHT", "DONE"])
+var planSwitchStepSchema = z5.object({
+  index: z5.number().int().nonnegative(),
+  kind: z5.string().min(1),
+  state: z5.enum(["PENDING", "IN_FLIGHT", "DONE"])
 });
-var planSwitchAppliedResponseSchema = z4.object({
-  operationId: z4.string().min(1),
-  status: z4.literal("APPLIED"),
-  steps: z4.array(planSwitchStepSchema),
-  planSlug: z4.string().min(1),
+var planSwitchAppliedResponseSchema = z5.object({
+  operationId: z5.string().min(1),
+  status: z5.literal("APPLIED"),
+  steps: z5.array(planSwitchStepSchema),
+  planSlug: z5.string().min(1),
   interval: intervalField,
-  invoiceIds: z4.array(z4.string())
+  invoiceIds: z5.array(z5.string())
 });
-var planSwitchOpenResponseSchema = z4.object({
-  operationId: z4.string().min(1),
-  status: z4.literal("OPEN")
+var planSwitchOpenResponseSchema = z5.object({
+  operationId: z5.string().min(1),
+  status: z5.literal("OPEN")
 });
-var planSwitchResponseSchema = z4.discriminatedUnion("status", [
+var planSwitchResponseSchema = z5.discriminatedUnion("status", [
   planSwitchAppliedResponseSchema,
   planSwitchOpenResponseSchema
 ]);
-var planSwitchOperationResponseSchema = z4.object({
-  operationId: z4.string().min(1),
-  status: z4.enum(["OPEN", "APPLIED", "FAILED", "COMPENSATED"]),
-  steps: z4.array(planSwitchStepSchema),
-  previewId: z4.string().min(1).nullable(),
-  invoiceIds: z4.array(z4.string()),
-  resolutionNeeded: z4.boolean(),
+var planSwitchOperationResponseSchema = z5.object({
+  operationId: z5.string().min(1),
+  status: z5.enum(["OPEN", "APPLIED", "FAILED", "COMPENSATED"]),
+  steps: z5.array(planSwitchStepSchema),
+  previewId: z5.string().min(1).nullable(),
+  invoiceIds: z5.array(z5.string()),
+  resolutionNeeded: z5.boolean(),
   unknownSince: isoInstant.nullable()
 });
-var switchInProgressErrorSchema = z4.object({
-  error: z4.literal("switch_in_progress"),
-  operationId: z4.string().min(1)
+var switchInProgressErrorSchema = z5.object({
+  error: z5.literal("switch_in_progress"),
+  operationId: z5.string().min(1)
 });
 var PLAN_SWITCH_DEDICATED_ERROR_CODES = ["members_exceed_target", "preview_stale", "switch_in_progress"];
 var DEDICATED_CODES = new Set(PLAN_SWITCH_DEDICATED_ERROR_CODES);
-var planSwitchOtherErrorSchema = z4.object({
-  error: z4.string().min(1).refine((code) => !DEDICATED_CODES.has(code), { message: "this code has its own schema" }),
-  message: z4.string().optional()
+var planSwitchOtherErrorSchema = z5.object({
+  error: z5.string().min(1).refine((code) => !DEDICATED_CODES.has(code), { message: "this code has its own schema" }),
+  message: z5.string().optional()
 }).loose();
-var planSwitchErrorSchema = z4.union([
+var planSwitchErrorSchema = z5.union([
   membersExceedTargetErrorSchema,
   previewStaleErrorSchema,
   switchInProgressErrorSchema,
@@ -2574,24 +2689,24 @@ function isMembersExceedTargetError(e) {
 }
 var ADDON_QUANTITY_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
 var ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH = Object.freeze({ min: 8, max: 128 });
-var addOnQuantityRequestSchema = z4.object({
-  quantity: z4.number().int().nonnegative(),
-  quantityRev: z4.union([z4.number().int().nonnegative(), z4.string().regex(/^\d{1,18}$/)])
+var addOnQuantityRequestSchema = z5.object({
+  quantity: z5.number().int().nonnegative(),
+  quantityRev: z5.union([z5.number().int().nonnegative(), z5.string().regex(/^\d{1,18}$/)])
 }).strict();
-var addOnQuantityResponseSchema = z4.object({
-  tenantAddOnId: z4.string(),
+var addOnQuantityResponseSchema = z5.object({
+  tenantAddOnId: z5.string(),
   /** The quantity this revision asked for. */
-  quantity: z4.number().int().nonnegative(),
+  quantity: z5.number().int().nonnegative(),
   /** The revision, as a decimal string. */
-  quantityRev: z4.string(),
+  quantityRev: z5.string(),
   /** What Stripe bills now. */
-  billedQuantity: z4.number().int().nonnegative(),
+  billedQuantity: z5.number().int().nonnegative(),
   /** A newer revision already superseded this one; Stripe converges on the newest. */
-  superseded: z4.boolean(),
+  superseded: z5.boolean(),
   /** X1: the TenantAddOn status after the change (ACTIVE, TRIALING, PAST_DUE, CANCELED). Absent from R1. */
-  status: z4.string().optional(),
+  status: z5.string().optional(),
   /** X1: true when quantity 0 ended the add-on's own subscription. Absent from R1. */
-  subscriptionCanceled: z4.boolean().optional()
+  subscriptionCanceled: z5.boolean().optional()
 });
 var ADDON_QUANTITY_ERROR_CODES = [
   "members_exceed_quantity",
@@ -2612,27 +2727,27 @@ var ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES = [
   "IDEMPOTENCY_KEY_INVALID",
   "IDEMPOTENCY_KEY_CONFLICT"
 ];
-var extraMlosExceedQuantityErrorSchema = z4.object({
-  success: z4.literal(false),
-  error: z4.string(),
-  code: z4.literal("extra_mlos_exceed_quantity"),
-  activeLoginless: z4.number().int().nonnegative(),
-  quantity: z4.number().int().nonnegative()
+var extraMlosExceedQuantityErrorSchema = z5.object({
+  success: z5.literal(false),
+  error: z5.string(),
+  code: z5.literal("extra_mlos_exceed_quantity"),
+  activeLoginless: z5.number().int().nonnegative(),
+  quantity: z5.number().int().nonnegative()
 });
-var membersExceedQuantityErrorSchema = z4.object({
-  success: z4.literal(false),
-  error: z4.string(),
-  code: z4.literal("members_exceed_quantity"),
-  activeMembers: z4.number().int().nonnegative(),
-  quantity: z4.number().int().nonnegative()
+var membersExceedQuantityErrorSchema = z5.object({
+  success: z5.literal(false),
+  error: z5.string(),
+  code: z5.literal("members_exceed_quantity"),
+  activeMembers: z5.number().int().nonnegative(),
+  quantity: z5.number().int().nonnegative()
 });
-var addOnQuantityOtherErrorSchema = z4.object({
-  success: z4.literal(false).optional(),
+var addOnQuantityOtherErrorSchema = z5.object({
+  success: z5.literal(false).optional(),
   /** Human-readable. */
-  error: z4.string(),
-  code: z4.string().optional()
+  error: z5.string(),
+  code: z5.string().optional()
 }).loose();
-var addOnQuantityErrorSchema = z4.union([
+var addOnQuantityErrorSchema = z5.union([
   extraMlosExceedQuantityErrorSchema,
   membersExceedQuantityErrorSchema,
   addOnQuantityOtherErrorSchema
@@ -2645,7 +2760,7 @@ function isMembersExceedQuantityError(e) {
 }
 
 // src/types/v1-billing-reads.ts
-import { z as z5 } from "zod";
+import { z as z6 } from "zod";
 var V1_TENANT_MATCH_ERRORS = Object.freeze({
   /** A tenant-scoped key sent an X-Tenant-Id naming another tenant. Nothing was read for either. */
   tenantHeaderMismatch: "Forbidden \u2014 tenant header does not match credential",
@@ -2655,65 +2770,65 @@ var V1_TENANT_MATCH_ERRORS = Object.freeze({
 function appNotEnabledForTenantError(appSlug) {
   return `Forbidden \u2014 app '${appSlug}' is not enabled for tenant`;
 }
-var v1TenantMatchErrorSchema = z5.object({ error: z5.string().min(1) });
-var planGrantsReadResponseSchema = z5.object({
-  rev: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  grants: z5.array(z5.string().min(1)),
-  planSlug: z5.string().min(1),
+var v1TenantMatchErrorSchema = z6.object({ error: z6.string().min(1) });
+var planGrantsReadResponseSchema = z6.object({
+  rev: z6.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  grants: z6.array(z6.string().min(1)),
+  planSlug: z6.string().min(1),
   cyr: tenantCyrStateSchema.nullable()
 });
 var PLAN_GRANTS_READ_ERROR_CODES = ["no_plan_grants", "plan_grants_unavailable"];
-var planGrantsReadErrorSchema = z5.object({ error: z5.enum(PLAN_GRANTS_READ_ERROR_CODES) });
-var addOnUnitPriceSchema = z5.object({
-  monthly: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
-  yearly: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+var planGrantsReadErrorSchema = z6.object({ error: z6.enum(PLAN_GRANTS_READ_ERROR_CODES) });
+var addOnUnitPriceSchema = z6.object({
+  monthly: z6.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
+  yearly: z6.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
 });
-var addOnOneTimePriceSchema = z5.object({
-  monthly: z5.null(),
-  yearly: z5.null(),
-  once: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+var addOnOneTimePriceSchema = z6.object({
+  monthly: z6.null(),
+  yearly: z6.null(),
+  once: z6.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
 });
 var TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"];
-var v1AddOnTenantSubscriptionSchema = z5.object({
-  status: z5.string().min(1),
-  quantity: z5.number().int().nonnegative(),
-  requestedQuantity: z5.number().int().nonnegative().nullable(),
-  quantityRev: z5.string().regex(/^\d{1,19}$/).nullable(),
-  trialEndsAt: z5.string().datetime({ offset: true }).nullable()
+var v1AddOnTenantSubscriptionSchema = z6.object({
+  status: z6.string().min(1),
+  quantity: z6.number().int().nonnegative(),
+  requestedQuantity: z6.number().int().nonnegative().nullable(),
+  quantityRev: z6.string().regex(/^\d{1,19}$/).nullable(),
+  trialEndsAt: z6.string().datetime({ offset: true }).nullable()
 });
 var v1AddOnReadFields = {
-  id: z5.string().min(1),
-  appSlug: z5.string().min(1),
-  name: z5.string().min(1),
-  isActive: z5.boolean(),
+  id: z6.string().min(1),
+  appSlug: z6.string().min(1),
+  name: z6.string().min(1),
+  isActive: z6.boolean(),
   tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable()
 };
-var v1AddOnReadSchema = z5.discriminatedUnion("type", [
-  z5.object({ ...v1AddOnReadFields, type: z5.literal("RECURRING"), price: addOnUnitPriceSchema }),
-  z5.object({ ...v1AddOnReadFields, type: z5.literal("ONE_TIME"), price: addOnOneTimePriceSchema })
+var v1AddOnReadSchema = z6.discriminatedUnion("type", [
+  z6.object({ ...v1AddOnReadFields, type: z6.literal("RECURRING"), price: addOnUnitPriceSchema }),
+  z6.object({ ...v1AddOnReadFields, type: z6.literal("ONE_TIME"), price: addOnOneTimePriceSchema })
 ]);
-var v1AddOnsReadResponseSchema = z5.object({ addOns: z5.array(v1AddOnReadSchema) });
+var v1AddOnsReadResponseSchema = z6.object({ addOns: z6.array(v1AddOnReadSchema) });
 var ADD_ONS_READ_ERROR_CODES = ["add_ons_unavailable"];
-var addOnsReadErrorSchema = z5.object({ error: z5.enum(ADD_ONS_READ_ERROR_CODES) });
+var addOnsReadErrorSchema = z6.object({ error: z6.enum(ADD_ONS_READ_ERROR_CODES) });
 var ADD_ON_START_IDEMPOTENCY_HEADER = "X-Idempotency-Key";
-var addOnStartRequestSchema = z5.object({
-  addOnId: z5.string().min(1),
-  quantity: z5.number().int().positive().optional(),
-  trial: z5.boolean().optional(),
-  quantityRev: z5.union([z5.number().int().nonnegative(), z5.string().regex(/^\d{1,18}$/)]).optional()
+var addOnStartRequestSchema = z6.object({
+  addOnId: z6.string().min(1),
+  quantity: z6.number().int().positive().optional(),
+  trial: z6.boolean().optional(),
+  quantityRev: z6.union([z6.number().int().nonnegative(), z6.string().regex(/^\d{1,18}$/)]).optional()
 }).strict();
-var addOnStartResponseSchema = z5.object({
-  success: z5.literal(true),
-  data: z5.object({
-    tenantAddOnId: z5.string().min(1),
-    status: z5.string().min(1),
-    trialEndsAt: z5.string().datetime({ offset: true }).nullable().optional()
+var addOnStartResponseSchema = z6.object({
+  success: z6.literal(true),
+  data: z6.object({
+    tenantAddOnId: z6.string().min(1),
+    status: z6.string().min(1),
+    trialEndsAt: z6.string().datetime({ offset: true }).nullable().optional()
   })
 });
-var addOnStartErrorSchema = z5.object({
-  success: z5.literal(false),
-  error: z5.string().min(1),
-  code: z5.string().min(1).optional()
+var addOnStartErrorSchema = z6.object({
+  success: z6.literal(false),
+  error: z6.string().min(1),
+  code: z6.string().min(1).optional()
 }).loose();
 var ADD_ON_START_ERROR_CODES = [
   "not_a_check_your_rate_addon",
@@ -2729,9 +2844,9 @@ var ADD_ON_START_ERROR_CODES = [
 ];
 
 // src/types/embed-token.ts
-import { z as z6 } from "zod";
-var embedTokenId = z6.string().min(1);
-var embedTokenTime = z6.iso.datetime({ offset: true });
+import { z as z7 } from "zod";
+var embedTokenId = z7.string().min(1);
+var embedTokenTime = z7.iso.datetime({ offset: true });
 var EMBED_SURFACES = ["identity", "rate-widget"];
 var EMBED_TOKEN_SCOPES = ["hs:identity-editor", "hs:rate-widget"];
 var EMBED_SURFACE_SCOPE = Object.freeze({
@@ -2740,43 +2855,43 @@ var EMBED_SURFACE_SCOPE = Object.freeze({
 });
 var EMBED_TOKEN_AUDIENCE = "home-scout";
 var EMBED_TOKEN_PREFIX = "rpe_";
-var embedTokenScope = z6.enum(EMBED_TOKEN_SCOPES);
-var embedTokenMintRequestSchema = z6.object({
+var embedTokenScope = z7.enum(EMBED_TOKEN_SCOPES);
+var embedTokenMintRequestSchema = z7.object({
   agentId: embedTokenId,
-  surface: z6.enum(EMBED_SURFACES)
+  surface: z7.enum(EMBED_SURFACES)
 }).strict();
-var embedTokenMintResponseSchema = z6.object({
-  token: z6.string().startsWith(EMBED_TOKEN_PREFIX).min(EMBED_TOKEN_PREFIX.length + 1),
+var embedTokenMintResponseSchema = z7.object({
+  token: z7.string().startsWith(EMBED_TOKEN_PREFIX).min(EMBED_TOKEN_PREFIX.length + 1),
   /** ISO-8601. */
   expiresAt: embedTokenTime,
-  audience: z6.literal(EMBED_TOKEN_AUDIENCE),
+  audience: z7.literal(EMBED_TOKEN_AUDIENCE),
   scope: embedTokenScope,
   tenantId: embedTokenId,
   agentId: embedTokenId
 }).strict();
-var embedTokenVerifyRequestSchema = z6.object({
-  token: z6.string().min(1)
+var embedTokenVerifyRequestSchema = z7.object({
+  token: z7.string().min(1)
 }).strict();
 var EMBED_TOKEN_INVALID_REASONS = ["expired", "revoked", "unknown_token"];
-var embedTokenVerifyValidSchema = z6.object({
-  valid: z6.literal(true),
+var embedTokenVerifyValidSchema = z7.object({
+  valid: z7.literal(true),
   tenantId: embedTokenId,
   agentId: embedTokenId,
   scope: embedTokenScope,
   /** ISO-8601. */
   expiresAt: embedTokenTime
 }).strict();
-var embedTokenVerifyInvalidSchema = z6.object({
-  valid: z6.literal(false),
-  reason: z6.enum(EMBED_TOKEN_INVALID_REASONS)
+var embedTokenVerifyInvalidSchema = z7.object({
+  valid: z7.literal(false),
+  reason: z7.enum(EMBED_TOKEN_INVALID_REASONS)
 }).strict();
-var embedTokenVerifyResponseSchema = z6.discriminatedUnion("valid", [
+var embedTokenVerifyResponseSchema = z7.discriminatedUnion("valid", [
   embedTokenVerifyValidSchema,
   embedTokenVerifyInvalidSchema
 ]);
-var tenantAppAccessResponseSchema = z6.object({
+var tenantAppAccessResponseSchema = z7.object({
   tenantId: embedTokenId,
-  servable: z6.boolean()
+  servable: z7.boolean()
 }).strict();
 var EMBED_TOKEN_ERRORS = Object.freeze({
   UNKNOWN_FIELD: "UNKNOWN_FIELD",
@@ -2815,6 +2930,10 @@ export {
   ADDON_QUANTITY_IDEMPOTENCY_HEADER,
   ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH,
   ADD_ONS_READ_ERROR_CODES,
+  ADD_ON_CHARGE_ONCE_ERROR_CODES,
+  ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER,
+  ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS,
+  ADD_ON_CHARGE_ONCE_MANUAL_REASONS,
   ADD_ON_START_ERROR_CODES,
   ADD_ON_START_IDEMPOTENCY_HEADER,
   AdminResource,
@@ -2848,6 +2967,15 @@ export {
   ServiceClient,
   TENANT_ADD_ON_STATUSES,
   V1_TENANT_MATCH_ERRORS,
+  addOnChargeOnceAnswerSchema,
+  addOnChargeOnceChargedSchema,
+  addOnChargeOnceDeclinedSchema,
+  addOnChargeOnceErrorSchema,
+  addOnChargeOnceManualSchema,
+  addOnChargeOnceQuerySchema,
+  addOnChargeOnceRequestIdSchema,
+  addOnChargeOnceRequestSchema,
+  addOnChargeOnceUnknownSchema,
   addOnOneTimePriceSchema,
   addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema,

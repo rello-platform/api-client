@@ -339,6 +339,35 @@ export type {
   AddOnStartErrorCode,
 } from "./types/index.js";
 
+// PFP Gateway "Match my design": the one-time add-on charge (KA prompt 1419)
+export {
+  ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER,
+  ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS,
+  addOnChargeOnceRequestIdSchema,
+  addOnChargeOnceRequestSchema,
+  addOnChargeOnceQuerySchema,
+  addOnChargeOnceChargedSchema,
+  addOnChargeOnceDeclinedSchema,
+  addOnChargeOnceUnknownSchema,
+  ADD_ON_CHARGE_ONCE_MANUAL_REASONS,
+  addOnChargeOnceManualSchema,
+  addOnChargeOnceAnswerSchema,
+  ADD_ON_CHARGE_ONCE_ERROR_CODES,
+  addOnChargeOnceErrorSchema,
+} from "./types/index.js";
+export type {
+  AddOnChargeOnceRequest,
+  AddOnChargeOnceQuery,
+  AddOnChargeOnceManualReason,
+  AddOnChargeOnceAnswer,
+  AddOnChargeOnceCharged,
+  AddOnChargeOnceDeclined,
+  AddOnChargeOnceUnknown,
+  AddOnChargeOnceManual,
+  AddOnChargeOnceErrorCode,
+  AddOnChargeOnceError,
+} from "./types/index.js";
+
 // PFP Gateway P-2: the embed token (mint, verify) and F2 tenant app access
 export {
   EMBED_SURFACES,
