@@ -71,13 +71,14 @@ export const PLAN_TRIAL_START_ERROR_CODES = [
 export type PlanTrialStartErrorCode = (typeof PLAN_TRIAL_START_ERROR_CODES)[number];
 
 /**
- * A refusal body `{ error, trial? }`. `error` is one of {@link PLAN_TRIAL_START_ERROR_CODES}: a body
- * naming any other code is not an answer this contract knows, so treat it as unreadable (unknown,
- * never "no trial"). `trial`, when present, carries its `status`. Extra keys are kept.
+ * A refusal body `{ error, trial? }`. `error` is a plain non-empty string and `.loose()` keeps any extra
+ * field, like the add-on charge-once and plan-switch refusals, so a code Rello adds later still parses:
+ * compare it with {@link PLAN_TRIAL_START_ERROR_CODES} and treat a code not in the list as a refusal
+ * you cannot name (never as "no trial"). `trial`, when present, carries its `status`.
  */
 export const planTrialStartErrorSchema = z
   .object({
-    error: z.enum(PLAN_TRIAL_START_ERROR_CODES),
+    error: z.string().min(1),
     trial: planTrialStateSchema.extend({ status: z.string() }).optional(),
   })
   .loose();

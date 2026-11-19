@@ -2264,7 +2264,7 @@ var PLAN_TRIAL_START_ERROR_CODES = [
   "plan_trial_unavailable"
 ];
 var planTrialStartErrorSchema = import_zod2.z.object({
-  error: import_zod2.z.enum(PLAN_TRIAL_START_ERROR_CODES),
+  error: import_zod2.z.string().min(1),
   trial: planTrialStateSchema.extend({ status: import_zod2.z.string() }).optional()
 }).loose();
 

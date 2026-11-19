@@ -4511,22 +4511,13 @@ type PlanTrialStartResponse = z.infer<typeof planTrialStartResponseSchema>;
 declare const PLAN_TRIAL_START_ERROR_CODES: readonly ["trial_already_used", "already_entitled", "not_gateway_tenant", "switch_in_progress", "switch_not_allowed", "unknown_trial_plan", "trial_plan_unknown", "invalid_body", "plan_trial_unavailable"];
 type PlanTrialStartErrorCode = (typeof PLAN_TRIAL_START_ERROR_CODES)[number];
 /**
- * A refusal body `{ error, trial? }`. `error` is one of {@link PLAN_TRIAL_START_ERROR_CODES}: a body
- * naming any other code is not an answer this contract knows, so treat it as unreadable (unknown,
- * never "no trial"). `trial`, when present, carries its `status`. Extra keys are kept.
+ * A refusal body `{ error, trial? }`. `error` is a plain non-empty string and `.loose()` keeps any extra
+ * field, like the add-on charge-once and plan-switch refusals, so a code Rello adds later still parses:
+ * compare it with {@link PLAN_TRIAL_START_ERROR_CODES} and treat a code not in the list as a refusal
+ * you cannot name (never as "no trial"). `trial`, when present, carries its `status`.
  */
 declare const planTrialStartErrorSchema: z.ZodObject<{
-    error: z.ZodEnum<{
-        trial_already_used: "trial_already_used";
-        already_entitled: "already_entitled";
-        not_gateway_tenant: "not_gateway_tenant";
-        switch_in_progress: "switch_in_progress";
-        switch_not_allowed: "switch_not_allowed";
-        unknown_trial_plan: "unknown_trial_plan";
-        trial_plan_unknown: "trial_plan_unknown";
-        invalid_body: "invalid_body";
-        plan_trial_unavailable: "plan_trial_unavailable";
-    }>;
+    error: z.ZodString;
     trial: z.ZodOptional<z.ZodObject<{
         planSlug: z.ZodString;
         startedAt: z.ZodString;

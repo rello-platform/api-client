@@ -6,6 +6,26 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.44.0 — 2026-11-19
+
+### Changed — the plan-trial refusal's `error` is an open string (PFP Gateway, KA 1457)
+
+Platform KA prompt 1457, KA ruling. Version read at 2026-11-19: v2.43.0 tagged, no open PR claims
+v2.44.0 (the only open PR is #10, which takes the next free version when it merges).
+
+- `planTrialStartErrorSchema`'s `error` goes from `z.enum(PLAN_TRIAL_START_ERROR_CODES)` to
+  `z.string().min(1)`, the pattern of `addOnChargeOnceErrorSchema` and the plan-switch open branch. v2.43.0's
+  enum meant a code Rello adds later did not parse, so PathfinderPro could not read that refusal at all.
+  `trial?` and `.loose()` are unchanged; every body that parsed in v2.43.0 parses identically (same
+  output); the only new bodies that parse are ones whose `error` is a non-empty string outside the list.
+- `PLAN_TRIAL_START_ERROR_CODES` stays the list of nine known codes, and `PlanTrialStartErrorCode` is
+  unchanged. Compare `error` against the list; a code not in it is a refusal you cannot name, never "no trial".
+- Type-level: `PlanTrialStartError["error"]` is now `string` (was the nine-code union). A caller that
+  switched exhaustively on it needs a default branch; no runtime behaviour of a known code changes.
+- Unchanged by ruling: timestamps stay strict ISO datetimes; `trial` is accepted on any code.
+- Test `tests/plan-trial-error-open-1457.test.mjs`. `tests/plan-trial-1451.test.mjs`: the one assertion
+  that an unlisted code is refused is now the opposite (it pinned the enum this version removes).
+
 ## v2.43.0 — 2026-11-19
 
 ### Added — the once-per-tenant Full PFP plan trial (PFP Gateway G-10R-2t-A, ruling K11a)

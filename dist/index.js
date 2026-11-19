@@ -2074,7 +2074,7 @@ var PLAN_TRIAL_START_ERROR_CODES = [
   "plan_trial_unavailable"
 ];
 var planTrialStartErrorSchema = z2.object({
-  error: z2.enum(PLAN_TRIAL_START_ERROR_CODES),
+  error: z2.string().min(1),
   trial: planTrialStateSchema.extend({ status: z2.string() }).optional()
 }).loose();
 
