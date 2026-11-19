@@ -6,6 +6,31 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.39.0 — 2026-11-18
+
+The next minor after v2.38.0 (#19, P-2), set by Platform KA prompt 1335. Built
+on main 8903daa8a (v2.38.0) merged into this branch; dist rebuilt from the
+combined source. Tag only after Rello's `once` producer is deployed.
+
+### Added — a ONE_TIME add-on's one-time price on the add-ons read (PFP Gateway G-LR Part B)
+
+Platform KA prompts 1323 / 1329; map MAP-ADD-LENDER-REQUEST-261117 §3a / §9.
+Rello side: branch a5/glr-partb-billing-read-1323 (GET /api/v1/billing/add-ons).
+
+- `src/types/v1-billing-reads.ts`:
+  - `addOnOneTimePriceSchema` { monthly: null, yearly: null, once } — `once` is
+    integer cents for one purchase (the price Kelly sets on the add-on), `null`
+    only when no one-time price is set (unknown, never $0). The key is always
+    present on a ONE_TIME item. Type `AddOnOneTimePrice`.
+  - `v1AddOnReadSchema` is now discriminated on `type`: RECURRING keeps
+    `price: addOnUnitPriceSchema` exactly as before (no `once` key); ONE_TIME
+    takes `price: addOnOneTimePriceSchema`. Before this, zod's default object
+    stripped an unknown `once`, so a caller parsing Rello's answer would have
+    lost the price silently.
+- Test: `tests/glr-partb-add-on-once-price.test.mjs` (red at v2.37.0 on 3
+  assertions + 1 missing export; green 5/5; full suite 238/238 at v2.37.0,
+  250/250 after main v2.38.0 was merged in).
+
 ## v2.38.0 — unpublished (not tagged)
 
 ### Added — the embed token and F2 tenant app access (PFP Gateway P-2)

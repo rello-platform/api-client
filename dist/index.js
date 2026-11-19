@@ -2668,6 +2668,11 @@ var addOnUnitPriceSchema = z5.object({
   monthly: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
   yearly: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
 });
+var addOnOneTimePriceSchema = z5.object({
+  monthly: z5.null(),
+  yearly: z5.null(),
+  once: z5.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+});
 var TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"];
 var v1AddOnTenantSubscriptionSchema = z5.object({
   status: z5.string().min(1),
@@ -2676,15 +2681,17 @@ var v1AddOnTenantSubscriptionSchema = z5.object({
   quantityRev: z5.string().regex(/^\d{1,19}$/).nullable(),
   trialEndsAt: z5.string().datetime({ offset: true }).nullable()
 });
-var v1AddOnReadSchema = z5.object({
+var v1AddOnReadFields = {
   id: z5.string().min(1),
   appSlug: z5.string().min(1),
   name: z5.string().min(1),
-  type: z5.enum(["RECURRING", "ONE_TIME"]),
   isActive: z5.boolean(),
-  price: addOnUnitPriceSchema,
   tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable()
-});
+};
+var v1AddOnReadSchema = z5.discriminatedUnion("type", [
+  z5.object({ ...v1AddOnReadFields, type: z5.literal("RECURRING"), price: addOnUnitPriceSchema }),
+  z5.object({ ...v1AddOnReadFields, type: z5.literal("ONE_TIME"), price: addOnOneTimePriceSchema })
+]);
 var v1AddOnsReadResponseSchema = z5.object({ addOns: z5.array(v1AddOnReadSchema) });
 var ADD_ONS_READ_ERROR_CODES = ["add_ons_unavailable"];
 var addOnsReadErrorSchema = z5.object({ error: z5.enum(ADD_ONS_READ_ERROR_CODES) });
@@ -2841,6 +2848,7 @@ export {
   ServiceClient,
   TENANT_ADD_ON_STATUSES,
   V1_TENANT_MATCH_ERRORS,
+  addOnOneTimePriceSchema,
   addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,

@@ -58,6 +58,7 @@ __export(index_exports, {
   ServiceClient: () => ServiceClient,
   TENANT_ADD_ON_STATUSES: () => TENANT_ADD_ON_STATUSES,
   V1_TENANT_MATCH_ERRORS: () => V1_TENANT_MATCH_ERRORS,
+  addOnOneTimePriceSchema: () => addOnOneTimePriceSchema,
   addOnQuantityErrorSchema: () => addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema: () => addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema: () => addOnQuantityRequestSchema,
@@ -2838,6 +2839,11 @@ var addOnUnitPriceSchema = import_zod5.z.object({
   monthly: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable(),
   yearly: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
 });
+var addOnOneTimePriceSchema = import_zod5.z.object({
+  monthly: import_zod5.z.null(),
+  yearly: import_zod5.z.null(),
+  once: import_zod5.z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()
+});
 var TENANT_ADD_ON_STATUSES = ["ACTIVE", "TRIALING", "PAST_DUE", "CANCELED", "INCOMPLETE"];
 var v1AddOnTenantSubscriptionSchema = import_zod5.z.object({
   status: import_zod5.z.string().min(1),
@@ -2846,15 +2852,17 @@ var v1AddOnTenantSubscriptionSchema = import_zod5.z.object({
   quantityRev: import_zod5.z.string().regex(/^\d{1,19}$/).nullable(),
   trialEndsAt: import_zod5.z.string().datetime({ offset: true }).nullable()
 });
-var v1AddOnReadSchema = import_zod5.z.object({
+var v1AddOnReadFields = {
   id: import_zod5.z.string().min(1),
   appSlug: import_zod5.z.string().min(1),
   name: import_zod5.z.string().min(1),
-  type: import_zod5.z.enum(["RECURRING", "ONE_TIME"]),
   isActive: import_zod5.z.boolean(),
-  price: addOnUnitPriceSchema,
   tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable()
-});
+};
+var v1AddOnReadSchema = import_zod5.z.discriminatedUnion("type", [
+  import_zod5.z.object({ ...v1AddOnReadFields, type: import_zod5.z.literal("RECURRING"), price: addOnUnitPriceSchema }),
+  import_zod5.z.object({ ...v1AddOnReadFields, type: import_zod5.z.literal("ONE_TIME"), price: addOnOneTimePriceSchema })
+]);
 var v1AddOnsReadResponseSchema = import_zod5.z.object({ addOns: import_zod5.z.array(v1AddOnReadSchema) });
 var ADD_ONS_READ_ERROR_CODES = ["add_ons_unavailable"];
 var addOnsReadErrorSchema = import_zod5.z.object({ error: import_zod5.z.enum(ADD_ONS_READ_ERROR_CODES) });
@@ -3012,6 +3020,7 @@ function createServiceClient(config) {
   ServiceClient,
   TENANT_ADD_ON_STATUSES,
   V1_TENANT_MATCH_ERRORS,
+  addOnOneTimePriceSchema,
   addOnQuantityErrorSchema,
   addOnQuantityOtherErrorSchema,
   addOnQuantityRequestSchema,
