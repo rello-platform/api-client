@@ -6,6 +6,31 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.42.0 — 2026-11-19
+
+### Added — keep Refi Radar through a plan switch (PFP gateway G-10R-2b, K1)
+
+Platform KA prompt 1446, built to Agent 1's plan (a1-1442 §(b)). Version read at
+2026-11-19: v2.41.0 tagged, no open PR claims v2.42.0 (the only open PR is #10, which
+takes the next free version when it merges). Additive only; every new field is
+optional, so an old caller's request and an old server's response still parse and
+nothing is added to either.
+
+- `planSwitchPreviewQuerySchema` gains `keepAddOns` (`"refi-radar"`, optional; the param may be
+  repeated in the URL, each value checked; absent = drop).
+- `planSwitchRequestSchema` gains `keepAddOns: ["refi-radar"]` (array, `.max(1)`, optional);
+  `PlanSwitchRequest` gains `keepAddOns?: PlanSwitchKeepAddOn[]`.
+- The preview response's `chargeChange` gains optional `refiRadarKept: boolean` (interface and
+  zod). Absent is not `false`: an old server's answer parses and the key stays absent.
+- `PLAN_SWITCH_ERROR_CODES` gains `addon_not_offered` (400: the tenant doesn't hold Refi Radar,
+  or the target plan can't carry it). It is not a dedicated code, so it parses through
+  `planSwitchOtherErrorSchema` like every other plain refusal.
+- New exports: `PLAN_SWITCH_KEEP_ADDONS` (`["refi-radar"]`) and the type `PlanSwitchKeepAddOn`.
+- Prose fix (GD-2346): the `provider_changed` stale reason said "One GET, 0 mutations"; it now says
+  the shared reader's two reads, each ≤ 1 bounded retry; 0 mutations. Comment only.
+- Test `tests/plan-switch-keep-addons-1446.test.mjs` pins both directions. `tests/pkg2-plan-switch-addon-quantity.test.mjs`
+  pinned the exact 18-code list; it now asserts the 18 are still present, and the new file pins all 19.
+
 ## v2.41.0 — 2026-11-19
 
 ### Added — four named charge-once refusals (PFP Gateway "Match my design")

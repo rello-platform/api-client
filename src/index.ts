@@ -235,6 +235,7 @@ export type {
 // PFP Gateway G-10R + G-EXTRAS (PKG-2): plan switch and add-on quantity
 export {
   PLAN_SWITCH_INTERVALS,
+  PLAN_SWITCH_KEEP_ADDONS,
   planSwitchPreviewQuerySchema,
   planSwitchRequestSchema,
   PLAN_SWITCH_ERROR_CODES,
@@ -269,6 +270,7 @@ export {
 } from "./types/index.js";
 export type {
   PlanSwitchInterval,
+  PlanSwitchKeepAddOn,
   PlanSwitchPreviewQuery,
   PlanSwitchPreviewLine,
   PlanSwitchPreviewSubscription,
