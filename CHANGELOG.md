@@ -6,6 +6,30 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.41.0 — 2026-11-19
+
+### Added — four named charge-once refusals (PFP Gateway "Match my design")
+
+Platform KA prompt 1440 (ruling 1439). Version read at 2026-11-19: v2.40.0 tagged,
+no open PR claims v2.41.0 (the only open PR is #10, which takes the next free
+version when it merges). Additive only: the three v2.40.0 codes are unchanged.
+
+- `ADD_ON_CHARGE_ONCE_ERROR_CODES` gains four codes that Rello's route (Rello PR #2519) answers:
+  - `request_id_in_use` — 422: one request id reused for a different add-on; nothing charged.
+  - `request_id_ambiguous` — 409, GET only: a rare race.
+  - `billing_unavailable` — 503: Stripe not configured; nothing claimed.
+  - `add_on_not_priced` — 409: a ONE_TIME add-on with no one-time price (distinct from `price_changed`).
+- No new error class and no transport change. The client already maps these statuses like every
+  other method: a 4xx is thrown at once as `RelloError` with the body kept and is not retried; the
+  503 is retried by the transport (three attempts, the same idempotency key each time, so a retry
+  is the same charge) and then thrown as `RelloError` 503 with the body. Compare `err.body.error`
+  with `ADD_ON_CHARGE_ONCE_ERROR_CODES`.
+- `addOnChargeOnceErrorSchema` is unchanged (`error` stays a plain string, `.loose()`), so a code
+  added later still parses.
+- Test `tests/addon-charge-once-codes-1440.test.mjs` pins the seven-code list and one round trip per
+  new code through the client. `tests/addon-charge-once-1419.test.mjs` pinned the exact three-code
+  list; it now asserts the three are still present.
+
 ## v2.40.0 — 2026-11-19
 
 ### Added — the one-time add-on charge (PFP Gateway "Match my design")

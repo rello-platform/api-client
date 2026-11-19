@@ -65,7 +65,7 @@ test("GET query schema: requestId 8-128, strict; error schema keeps the code and
   assert.equal(api.addOnChargeOnceQuerySchema.safeParse({ requestId: "req-12345678" }).success, true);
   assert.equal(api.addOnChargeOnceQuerySchema.safeParse({ requestId: "short" }).success, false);
   assert.equal(api.addOnChargeOnceQuerySchema.safeParse({ requestId: "req-12345678", tenantId: "t" }).success, false);
-  assert.deepEqual([...api.ADD_ON_CHARGE_ONCE_ERROR_CODES].sort(), ["add_on_not_found", "add_on_not_one_time", "price_changed"]);
+  for (const code of ["add_on_not_found", "add_on_not_one_time", "price_changed"]) assert.ok(api.ADD_ON_CHARGE_ONCE_ERROR_CODES.includes(code), `${code} stays in the list (v2.41.0 only adds; the exact list is pinned in addon-charge-once-codes-1440.test.mjs)`);
   for (const error of api.ADD_ON_CHARGE_ONCE_ERROR_CODES) assert.equal(api.addOnChargeOnceErrorSchema.safeParse({ error }).success, true, error);
   const future = api.addOnChargeOnceErrorSchema.safeParse({ error: "some_later_code", detail: 1 });
   assert.equal(future.success, true, "a later code still parses");
