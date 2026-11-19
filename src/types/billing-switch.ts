@@ -20,13 +20,27 @@ export type PlanSwitchInterval = (typeof PLAN_SWITCH_INTERVALS)[number];
 
 const intervalField = z.enum(PLAN_SWITCH_INTERVALS);
 
+/**
+ * Add-ons a Pro/Team -> Starter/Rates switch can keep instead of dropping (K1, v2.42.0).
+ * Today only Refi Radar. Absent = drop, exactly as before.
+ */
+export const PLAN_SWITCH_KEEP_ADDONS = ["refi-radar"] as const;
+export type PlanSwitchKeepAddOn = (typeof PLAN_SWITCH_KEEP_ADDONS)[number];
+
+const keepAddOnField = z.enum(PLAN_SWITCH_KEEP_ADDONS);
+
 // ─── Preview ────────────────────────────────────────────────────────────────
 
-/** Query of `GET /api/v1/billing/plan-switch/preview`. `interval` absent = the current one. */
+/**
+ * Query of `GET /api/v1/billing/plan-switch/preview`. `interval` absent = the current one.
+ * `keepAddOns` (v2.42.0): `refi-radar` to keep Refi Radar through the switch; the param may be
+ * repeated in the URL and each value is checked against {@link PLAN_SWITCH_KEEP_ADDONS}; absent = drop.
+ */
 export const planSwitchPreviewQuerySchema = z
   .object({
     targetPlanSlug: z.string().trim().min(1),
     interval: intervalField.optional(),
+    keepAddOns: keepAddOnField.optional(),
   })
   .strict();
 export type PlanSwitchPreviewQuery = z.infer<typeof planSwitchPreviewQuerySchema>;
@@ -64,7 +78,8 @@ export interface PlanSwitchPreviewResponse {
   requiresConfirmation: boolean;
   subscriptions: PlanSwitchPreviewSubscription[];
   planChange: { from: string; to: string; fromInterval: PlanSwitchInterval; toInterval: PlanSwitchInterval };
-  chargeChange: { carriedCheckYourRateSeat: boolean; refiRadarDrops: boolean };
+  /** `refiRadarKept` (v2.42.0) is present only when the server answers the keep-add-ons question; absent is not `false`. */
+  chargeChange: { carriedCheckYourRateSeat: boolean; refiRadarDrops: boolean; refiRadarKept?: boolean };
 }
 
 // ─── POST ───────────────────────────────────────────────────────────────────
@@ -86,6 +101,8 @@ export const planSwitchRequestSchema = z
     idempotencyKey: z.string().min(8).max(200),
     previewId: z.string().min(1).optional(),
     confirmedChargeChange: z.unknown().optional(),
+    /** v2.42.0 (K1): keep Refi Radar through a Pro/Team -> Starter/Rates switch. Absent = drop. */
+    keepAddOns: z.array(keepAddOnField).max(1).optional(),
   })
   .strict();
 export type PlanSwitchRequestParsed = z.infer<typeof planSwitchRequestSchema>;
@@ -97,6 +114,8 @@ export interface PlanSwitchRequest {
   idempotencyKey: string;
   previewId?: string;
   confirmedChargeChange?: true;
+  /** v2.42.0 (K1): at most one entry, today `["refi-radar"]`. Absent = drop. */
+  keepAddOns?: PlanSwitchKeepAddOn[];
 }
 
 export type PlanSwitchOperationStatus = "OPEN" | "APPLIED" | "FAILED" | "COMPENSATED";
@@ -145,7 +164,8 @@ export interface PlanSwitchOperationResponse {
  * refused, never a send gate.
  *
  *  400 invalid_body · switch_not_allowed · contact_sales · addon_price_not_configured ·
- *      confirmation_required (a D47 downgrade without previewId + confirmedChargeChange === true)
+ *      confirmation_required (a D47 downgrade without previewId + confirmedChargeChange === true) ·
+ *      addon_not_offered (v2.42.0: keepAddOns names an add-on the tenant doesn't hold, or the target plan can't carry)
  *  402 payment_failed (step 1 declined; nothing applied)
  *  404 operation_not_found
  *  409 idempotency_key_reused · members_exceed_target · billing_mode_classic · already_on_plan ·
@@ -174,6 +194,7 @@ export const PLAN_SWITCH_ERROR_CODES = [
   "not_armed",
   "use_plan_switch",
   "operation_not_found",
+  "addon_not_offered",
 ] as const;
 export type PlanSwitchErrorCode = (typeof PLAN_SWITCH_ERROR_CODES)[number];
 
@@ -183,7 +204,7 @@ export type PlanSwitchErrorCode = (typeof PLAN_SWITCH_ERROR_CODES)[number];
  *  - inputs_changed: an add-on quantity, a new add-on row or a catalog price id changed
  *    since the preview. 0 operations and 0 Stripe calls of any kind.
  *  - provider_changed: Stripe's plan price, period end, an add-on item, or the
- *    add-on subscription's trial state differs from what the preview read. One GET, 0 mutations.
+ *    add-on subscription's trial state differs from what the preview read. The shared reader's two reads, each ≤ 1 bounded retry; 0 mutations.
  *  - expired: past `expiresAt`.
  * What PFP does for any of them: fetch a fresh preview and confirm again.
  */
@@ -265,7 +286,7 @@ export const planSwitchPreviewResponseSchema = z.object({
     fromInterval: intervalField,
     toInterval: intervalField,
   }),
-  chargeChange: z.object({ carriedCheckYourRateSeat: z.boolean(), refiRadarDrops: z.boolean() }),
+  chargeChange: z.object({ carriedCheckYourRateSeat: z.boolean(), refiRadarDrops: z.boolean(), refiRadarKept: z.boolean().optional() }),
 }) satisfies z.ZodType<PlanSwitchPreviewResponse>;
 
 export const planSwitchStepSchema = z.object({

@@ -2574,9 +2574,12 @@ var smsRegistrationChangedEvent = z4.strictObject({
 import { z as z5 } from "zod";
 var PLAN_SWITCH_INTERVALS = ["month", "year"];
 var intervalField = z5.enum(PLAN_SWITCH_INTERVALS);
+var PLAN_SWITCH_KEEP_ADDONS = ["refi-radar"];
+var keepAddOnField = z5.enum(PLAN_SWITCH_KEEP_ADDONS);
 var planSwitchPreviewQuerySchema = z5.object({
   targetPlanSlug: z5.string().trim().min(1),
-  interval: intervalField.optional()
+  interval: intervalField.optional(),
+  keepAddOns: keepAddOnField.optional()
 }).strict();
 var planSwitchRequestSchema = z5.object({
   targetPlanSlug: z5.string().min(1),
@@ -2584,7 +2587,9 @@ var planSwitchRequestSchema = z5.object({
   interval: intervalField.optional(),
   idempotencyKey: z5.string().min(8).max(200),
   previewId: z5.string().min(1).optional(),
-  confirmedChargeChange: z5.unknown().optional()
+  confirmedChargeChange: z5.unknown().optional(),
+  /** v2.42.0 (K1): keep Refi Radar through a Pro/Team -> Starter/Rates switch. Absent = drop. */
+  keepAddOns: z5.array(keepAddOnField).max(1).optional()
 }).strict();
 var PLAN_SWITCH_ERROR_CODES = [
   "invalid_body",
@@ -2604,7 +2609,8 @@ var PLAN_SWITCH_ERROR_CODES = [
   "provider_unreadable",
   "not_armed",
   "use_plan_switch",
-  "operation_not_found"
+  "operation_not_found",
+  "addon_not_offered"
 ];
 var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"];
 var previewStaleErrorSchema = z5.object({
@@ -2644,7 +2650,7 @@ var planSwitchPreviewResponseSchema = z5.object({
     fromInterval: intervalField,
     toInterval: intervalField
   }),
-  chargeChange: z5.object({ carriedCheckYourRateSeat: z5.boolean(), refiRadarDrops: z5.boolean() })
+  chargeChange: z5.object({ carriedCheckYourRateSeat: z5.boolean(), refiRadarDrops: z5.boolean(), refiRadarKept: z5.boolean().optional() })
 });
 var planSwitchStepSchema = z5.object({
   index: z5.number().int().nonnegative(),
@@ -2961,6 +2967,7 @@ export {
   PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
+  PLAN_SWITCH_KEEP_ADDONS,
   PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS,
   ROSTER_ERROR_CODES,

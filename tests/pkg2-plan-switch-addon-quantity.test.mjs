@@ -68,7 +68,8 @@ test("plan-switch error codes: the whole union, incl. confirmation_required, pre
     "preview_stale", "preview_consumed", "stale_switch", "switch_in_progress", "payment_failed",
     "provider_unreadable", "not_armed", "use_plan_switch", "operation_not_found",
   ];
-  assert.deepEqual([...codes].sort(), [...expected].sort());
+  // v2.42.0 added addon_not_offered; the exact list is pinned in plan-switch-keep-addons-1446.test.mjs.
+  for (const code of expected) assert.ok(codes.includes(code), `${code} stays in the list`);
   assert.equal(new Set(codes).size, codes.length, "no duplicates");
 });
 

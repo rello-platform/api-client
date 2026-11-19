@@ -48,6 +48,7 @@ __export(index_exports, {
   PLAN_SWITCH_DEDICATED_ERROR_CODES: () => PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES: () => PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS: () => PLAN_SWITCH_INTERVALS,
+  PLAN_SWITCH_KEEP_ADDONS: () => PLAN_SWITCH_KEEP_ADDONS,
   PREVIEW_STALE_REASONS: () => PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS: () => PROPERTY_AUTOFILL_FIELD_KEYS,
   ROSTER_ERROR_CODES: () => ROSTER_ERROR_CODES,
@@ -2758,9 +2759,12 @@ var smsRegistrationChangedEvent = import_zod4.z.strictObject({
 var import_zod5 = require("zod");
 var PLAN_SWITCH_INTERVALS = ["month", "year"];
 var intervalField = import_zod5.z.enum(PLAN_SWITCH_INTERVALS);
+var PLAN_SWITCH_KEEP_ADDONS = ["refi-radar"];
+var keepAddOnField = import_zod5.z.enum(PLAN_SWITCH_KEEP_ADDONS);
 var planSwitchPreviewQuerySchema = import_zod5.z.object({
   targetPlanSlug: import_zod5.z.string().trim().min(1),
-  interval: intervalField.optional()
+  interval: intervalField.optional(),
+  keepAddOns: keepAddOnField.optional()
 }).strict();
 var planSwitchRequestSchema = import_zod5.z.object({
   targetPlanSlug: import_zod5.z.string().min(1),
@@ -2768,7 +2772,9 @@ var planSwitchRequestSchema = import_zod5.z.object({
   interval: intervalField.optional(),
   idempotencyKey: import_zod5.z.string().min(8).max(200),
   previewId: import_zod5.z.string().min(1).optional(),
-  confirmedChargeChange: import_zod5.z.unknown().optional()
+  confirmedChargeChange: import_zod5.z.unknown().optional(),
+  /** v2.42.0 (K1): keep Refi Radar through a Pro/Team -> Starter/Rates switch. Absent = drop. */
+  keepAddOns: import_zod5.z.array(keepAddOnField).max(1).optional()
 }).strict();
 var PLAN_SWITCH_ERROR_CODES = [
   "invalid_body",
@@ -2788,7 +2794,8 @@ var PLAN_SWITCH_ERROR_CODES = [
   "provider_unreadable",
   "not_armed",
   "use_plan_switch",
-  "operation_not_found"
+  "operation_not_found",
+  "addon_not_offered"
 ];
 var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"];
 var previewStaleErrorSchema = import_zod5.z.object({
@@ -2828,7 +2835,7 @@ var planSwitchPreviewResponseSchema = import_zod5.z.object({
     fromInterval: intervalField,
     toInterval: intervalField
   }),
-  chargeChange: import_zod5.z.object({ carriedCheckYourRateSeat: import_zod5.z.boolean(), refiRadarDrops: import_zod5.z.boolean() })
+  chargeChange: import_zod5.z.object({ carriedCheckYourRateSeat: import_zod5.z.boolean(), refiRadarDrops: import_zod5.z.boolean(), refiRadarKept: import_zod5.z.boolean().optional() })
 });
 var planSwitchStepSchema = import_zod5.z.object({
   index: import_zod5.z.number().int().nonnegative(),
@@ -3146,6 +3153,7 @@ function createServiceClient(config) {
   PLAN_SWITCH_DEDICATED_ERROR_CODES,
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
+  PLAN_SWITCH_KEEP_ADDONS,
   PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS,
   ROSTER_ERROR_CODES,
