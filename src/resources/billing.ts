@@ -1,5 +1,19 @@
+import type { z } from "zod";
 import type { Transport } from "../transport.js";
-import { RelloError, RelloValidationError } from "../errors.js";
+import { PlanSwitchApiError, RelloError, RelloUnavailableError, RelloValidationError } from "../errors.js";
+import {
+  planSwitchErrorSchema,
+  planSwitchOperationResponseSchema,
+  planSwitchPreviewQuerySchema,
+  planSwitchPreviewResponseSchema,
+  planSwitchRequestSchema,
+  planSwitchResponseSchema,
+  type PlanSwitchOperationResponse,
+  type PlanSwitchPreviewQuery,
+  type PlanSwitchPreviewResponse,
+  type PlanSwitchRequest,
+  type PlanSwitchResponse,
+} from "../types/billing-switch.js";
 import {
   ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER,
   ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS,
@@ -134,6 +148,79 @@ export class BillingResource {
     }
     return parseAnswer(raw, path, 200);
   }
+
+  // ─── Plan switch (UPGRADE-TO-RELLO §D6, v2.45.0; contract in ../types/billing-switch.ts) ──────────────
+  //
+  // The caller's platform ApiKey (it needs `billing:plan-switch:write`) and `tenantId` as X-Tenant-Id, like
+  // every method here. A 4xx/5xx answer throws PlanSwitchApiError (status, parsed body or null, raw). A
+  // request that got no answer throws RelloUnavailableError. A 2xx body this client cannot read throws a
+  // RelloError carrying the body, never returned as an answer.
+
+  /** `GET /api/v1/billing/plan-switch/preview`: Stripe's own numbers for the switch, and a `previewId` to confirm with. */
+  async previewPlanSwitch(tenantId: string, q: PlanSwitchPreviewQuery): Promise<PlanSwitchPreviewResponse> {
+    const path = "/billing/plan-switch/preview";
+    const query = planSwitchPreviewQuerySchema.safeParse(q);
+    if (!query.success) {
+      throw new RelloValidationError(path, null, { error: "invalid_request", issues: query.error.issues });
+    }
+    const { targetPlanSlug, interval, keepAddOns } = query.data;
+    // "long": the preview reads Stripe (one createPreview per subscription that changes).
+    const raw = await planSwitchCall(() =>
+      this.transport.get<unknown>(path, tenantId, { targetPlanSlug, interval, keepAddOns }, "long")
+    );
+    return parsePlanSwitchAnswer(planSwitchPreviewResponseSchema, raw, path);
+  }
+
+  /**
+   * `POST /api/v1/billing/plan-switch`. Resolves with APPLIED (200, finished inside the request) or OPEN (202:
+   * poll {@link getPlanSwitch}). The body is checked against the strict request schema first; a body it
+   * refuses sends nothing. Every transport retry sends the same `idempotencyKey`, so a retried POST is the
+   * same switch. ⚠ A RelloUnavailableError (timeout, network) is not "not switched": send the same key again.
+   * An unreadable 2xx body is thrown with statusCode 200 (this client cannot tell a 200 from a 202 there).
+   */
+  async switchPlan(tenantId: string, body: PlanSwitchRequest): Promise<PlanSwitchResponse> {
+    const path = "/billing/plan-switch";
+    const parsed = planSwitchRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new RelloValidationError(path, null, { error: "invalid_request", issues: parsed.error.issues });
+    }
+    // "long" (30 s): Rello runs the switch inline for up to 25 s before it answers OPEN.
+    const raw = await planSwitchCall(() =>
+      this.transport.request<unknown>("POST", path, { tenantId, body: parsed.data, timeout: "long" })
+    );
+    return parsePlanSwitchAnswer(planSwitchResponseSchema, raw, path);
+  }
+
+  /** `GET /api/v1/billing/plan-switch/[operationId]`. Another tenant's id answers 404 `operation_not_found`. */
+  async getPlanSwitch(tenantId: string, operationId: string): Promise<PlanSwitchOperationResponse> {
+    const base = "/billing/plan-switch/";
+    if (typeof operationId !== "string" || operationId.length === 0) {
+      throw new RelloValidationError(base, null, { error: "invalid_request", message: "operationId is required" });
+    }
+    const path = base + encodeURIComponent(operationId);
+    const raw = await planSwitchCall(() => this.transport.get<unknown>(path, tenantId));
+    return parsePlanSwitchAnswer(planSwitchOperationResponseSchema, raw, path);
+  }
+}
+
+/** A plan-switch route's HTTP refusal becomes PlanSwitchApiError; a request with no answer stays as it was. */
+async function planSwitchCall<T>(send: () => Promise<T>): Promise<T> {
+  try {
+    return await send();
+  } catch (err) {
+    if (err instanceof RelloError && !(err instanceof RelloUnavailableError)) {
+      const parsed = planSwitchErrorSchema.safeParse(err.body);
+      throw new PlanSwitchApiError(err, parsed.success ? parsed.data : null);
+    }
+    throw err;
+  }
+}
+
+/** A 2xx body that is not the answer is an error carrying that body: unknown, never a result. */
+function parsePlanSwitchAnswer<T>(schema: z.ZodType<T>, raw: unknown, path: string): T {
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  throw new RelloError(`Unreadable plan-switch answer: ${path}`, 200, path, null, raw);
 }
 
 /** An answer body that is not one of the four is an error carrying its status: unknown, never "charged" or "declined". */

@@ -6,6 +6,47 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.45.0 — 2026-11-20
+
+### Added — the plan switch as client methods, for UPGRADE-TO-RELLO (Platform KA prompt 1545)
+
+Design: PLATFORM-UPGRADE-TO-RELLO `DESIGN-UPGRADE-TO-RELLO-SHARED-261120.md` §D6 (with §D3 preview.ts, §D3(ii)
+G-1, §D7), KA ruling 1541. Version read at 2026-11-20: v2.44.0 tagged (newest), no open PR claims v2.45.0
+(the only open PR is #10, which takes the next free version when it merges). Additive.
+
+- `billing.previewPlanSwitch(tenantId, q)` → `GET /api/v1/billing/plan-switch/preview`;
+  `billing.switchPlan(tenantId, body)` → `POST /api/v1/billing/plan-switch` (APPLIED 200 or OPEN 202);
+  `billing.getPlanSwitch(tenantId, operationId)` → `GET /api/v1/billing/plan-switch/[operationId]`.
+  `tenantId` is the first argument and travels as `X-Tenant-Id`, like every billing method. Inputs are checked
+  with the existing schemas first (a refused input sends nothing; RelloValidationError). Answers are parsed
+  with the existing answer schemas; an unreadable 2xx body is thrown as a RelloError carrying it.
+  Timeouts: the preview and the POST use the "long" preset (30 s; Rello runs the switch inline for up to 25 s).
+- `PlanSwitchApiError` (extends RelloError): every 4xx/5xx answer of those three methods. `status`; `body` =
+  `planSwitchErrorSchema` parse of the answer, or `null` when it is not a plan-switch refusal (never a made-up
+  code); `raw` = the body as received; `cause` = the transport's original error. A request with no HTTP answer
+  stays RelloUnavailableError.
+- `PlanSwitchPreviewResponse.apps?: { kept, added, dropped }` (type `PlanSwitchApps`) and `amountDueNow?`
+  (minor units; negative = a credit). `PlanSwitchAppliedResponse.relloUrl?` and
+  `PlanSwitchOperationResponse.relloUrl?`: `string | null`. Absent stays absent in every case.
+- `planClass?` on `tenantPlanGrantsSchema` (the push's `planGrants`) and `planGrantsReadResponseSchema`
+  (`GET /api/v1/billing/plan-grants`): a non-empty plain string like `cause` on the same shape, so a class Rello
+  adds later never refuses the grants. `PLAN_CLASSES` (`["rello", "app"]`), type `PlanClass`, `isPlanClass()`.
+  This package has no schema for `billing.plan_grants_changed` data (Rello defines it locally); these are the two
+  plan-grants shapes v2.43.0's `trial` went to.
+- `PLAN_SWITCH_ERROR_CODES` gains `no_plan_subscription` (400; 20 codes, the first 19 unchanged). It parses
+  through the open branch, as every non-dedicated code does.
+
+### Changed — a non-JSON error body is kept (transport)
+
+`Transport` read an error body with `res.json()` and, on failure, `res.text()`. The failed `json()` had already
+consumed the stream, so the fallback always threw and the body was `null` (measured on Node 22: "Body has
+already been read"). It now reads the text once and tries JSON. A JSON body is the same value as before; an
+empty body is still `null`; a non-empty non-JSON body (an HTML 502) is now its text on `RelloError.body`, for
+every method.
+
+Test `tests/plan-switch-methods-1545.test.mjs`. `tests/plan-switch-keep-addons-1446.test.mjs`: the exact count of
+19 codes becomes "the 19 stay" (the new file pins all 20).
+
 ## v2.44.0 — 2026-11-19
 
 ### Changed — the plan-trial refusal's `error` is an open string (PFP Gateway, KA 1457)

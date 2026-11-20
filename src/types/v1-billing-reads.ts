@@ -60,6 +60,8 @@ export const planGrantsReadResponseSchema = z.object({
   cyr: tenantCyrStateSchema.nullable(),
   /** v2.43.0 (G-10R-2t-A): the Full PFP plan trial. null = none; ABSENT = an older Rello (unknown); never defaulted to null. */
   trial: planTrialStateSchema.nullable().optional(),
+  /** v2.45.0 (UPGRADE-TO-RELLO, ./plan-class.ts): "rello" | "app" today; a plain string, compare with isPlanClass(). ABSENT = an older Rello. */
+  planClass: z.string().min(1).optional(),
 });
 export type PlanGrantsReadResponse = z.infer<typeof planGrantsReadResponseSchema>;
 
