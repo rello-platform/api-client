@@ -80,6 +80,20 @@ export interface PlanSwitchPreviewResponse {
   planChange: { from: string; to: string; fromInterval: PlanSwitchInterval; toInterval: PlanSwitchInterval };
   /** `refiRadarKept` (v2.42.0) is present only when the server answers the keep-add-ons question; absent is not `false`. */
   chargeChange: { carriedCheckYourRateSeat: boolean; refiRadarDrops: boolean; refiRadarKept?: boolean };
+  /**
+   * v2.45.0 (UPGRADE-TO-RELLO §D3/§D6): the apps the tenant keeps, gains and loses through this switch, by app
+   * slug. ABSENT = an older Rello that does not say (unknown), never "no change".
+   */
+  apps?: PlanSwitchApps;
+  /** v2.45.0: what is charged now, in the currency's minor unit (the sum of `subscriptions[].total`; negative = a credit). Absent = an older Rello. */
+  amountDueNow?: number;
+}
+
+/** v2.45.0: a plan switch's effect on the tenant's apps, by app slug (Rello's D1 rule, from local rows). */
+export interface PlanSwitchApps {
+  kept: string[];
+  added: string[];
+  dropped: string[];
 }
 
 // ─── POST ───────────────────────────────────────────────────────────────────
@@ -135,6 +149,11 @@ export interface PlanSwitchAppliedResponse {
   planSlug: string;
   interval: PlanSwitchInterval;
   invoiceIds: string[];
+  /**
+   * v2.45.0 (UPGRADE-TO-RELLO §D7): where to send the person when the target is a Rello plan
+   * (`<Rello origin>/welcome/rello?op=<operationId>`); `null` for any other target. ABSENT = an older Rello.
+   */
+  relloUrl?: string | null;
 }
 
 /** 202: still running; poll `GET /api/v1/billing/plan-switch/[operationId]`. */
@@ -155,6 +174,8 @@ export interface PlanSwitchOperationResponse {
   resolutionNeeded: boolean;
   /** ISO, while the provider outcome is unknown; else null. */
   unknownSince: string | null;
+  /** v2.45.0 (§D7): as on {@link PlanSwitchAppliedResponse}, set once the operation is APPLIED to a Rello plan; else null. ABSENT = an older Rello. */
+  relloUrl?: string | null;
 }
 
 // ─── Plan-switch errors ─────────────────────────────────────────────────────
@@ -165,7 +186,9 @@ export interface PlanSwitchOperationResponse {
  *
  *  400 invalid_body · switch_not_allowed · contact_sales · addon_price_not_configured ·
  *      confirmation_required (a D47 downgrade without previewId + confirmedChargeChange === true) ·
- *      addon_not_offered (v2.42.0: keepAddOns names an add-on the tenant doesn't hold, or the target plan can't carry)
+ *      addon_not_offered (v2.42.0: keepAddOns names an add-on the tenant doesn't hold, or the target plan can't carry) ·
+ *      no_plan_subscription (v2.45.0: no Stripe customer, or no live plan subscription; send the person to
+ *      /pricing / Checkout instead)
  *  402 payment_failed (step 1 declined; nothing applied)
  *  404 operation_not_found
  *  409 idempotency_key_reused · members_exceed_target · billing_mode_classic · already_on_plan ·
@@ -195,6 +218,7 @@ export const PLAN_SWITCH_ERROR_CODES = [
   "use_plan_switch",
   "operation_not_found",
   "addon_not_offered",
+  "no_plan_subscription",
 ] as const;
 export type PlanSwitchErrorCode = (typeof PLAN_SWITCH_ERROR_CODES)[number];
 
@@ -287,6 +311,12 @@ export const planSwitchPreviewResponseSchema = z.object({
     toInterval: intervalField,
   }),
   chargeChange: z.object({ carriedCheckYourRateSeat: z.boolean(), refiRadarDrops: z.boolean(), refiRadarKept: z.boolean().optional() }),
+  /** v2.45.0: optional; absent stays absent. */
+  apps: z
+    .object({ kept: z.array(z.string().min(1)), added: z.array(z.string().min(1)), dropped: z.array(z.string().min(1)) })
+    .optional(),
+  /** v2.45.0: optional; absent stays absent. */
+  amountDueNow: minorAmount.optional(),
 }) satisfies z.ZodType<PlanSwitchPreviewResponse>;
 
 export const planSwitchStepSchema = z.object({
@@ -303,6 +333,8 @@ export const planSwitchAppliedResponseSchema = z.object({
   planSlug: z.string().min(1),
   interval: intervalField,
   invoiceIds: z.array(z.string()),
+  /** v2.45.0 (§D7): optional; absent stays absent. */
+  relloUrl: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<PlanSwitchAppliedResponse>;
 
 /** 202 of POST /api/v1/billing/plan-switch: still running; poll the operation. */
@@ -325,6 +357,8 @@ export const planSwitchOperationResponseSchema = z.object({
   invoiceIds: z.array(z.string()),
   resolutionNeeded: z.boolean(),
   unknownSince: isoInstant.nullable(),
+  /** v2.45.0 (§D7): optional; absent stays absent. */
+  relloUrl: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<PlanSwitchOperationResponse>;
 
 /** `409 switch_in_progress`: another switch for this tenant is running; poll it. */

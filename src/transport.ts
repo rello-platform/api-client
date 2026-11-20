@@ -159,12 +159,17 @@ export class Transport {
       return res.json() as Promise<T>;
     }
 
-    // Parse error body
-    let body: unknown;
-    try {
-      body = await res.json();
-    } catch {
-      body = await res.text().catch(() => null);
+    // Parse error body. Read it ONCE as text, then try JSON: a failed res.json() has already consumed the
+    // stream, so the old json-then-text fallback could never return the text (it was always null; v2.45.0).
+    // A JSON body is the same value as before; an empty body is still null; a non-JSON body is now its text.
+    let body: unknown = null;
+    const text = await res.text().catch(() => null);
+    if (text !== null && text !== "") {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = text;
+      }
     }
 
     const responseRequestId = res.headers.get("X-Request-Id") ?? requestId;

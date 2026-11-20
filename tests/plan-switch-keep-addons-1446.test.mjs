@@ -90,7 +90,8 @@ test("error code: addon_not_offered is in PLAN_SWITCH_ERROR_CODES, parses as a 4
   for (const code of ["invalid_body", "idempotency_key_reused", "switch_not_allowed", "contact_sales", "members_exceed_target", "addon_price_not_configured", "billing_mode_classic", "already_on_plan", "confirmation_required", "preview_stale", "preview_consumed", "stale_switch", "switch_in_progress", "payment_failed", "provider_unreadable", "not_armed", "use_plan_switch", "operation_not_found"]) {
     assert.ok(api.PLAN_SWITCH_ERROR_CODES.includes(code), `${code} stays`);
   }
-  assert.equal(api.PLAN_SWITCH_ERROR_CODES.length, 19);
+  // v2.45.0 appended no_plan_subscription; tests/plan-switch-methods-1545.test.mjs pins the full list of 20.
+  assert.ok(api.PLAN_SWITCH_ERROR_CODES.length >= 19, "the 19 codes of v2.42.0 stay");
 });
 
 test("prose (GD-2346): provider_changed no longer says 'One GET'; it says the shared reader's two reads, each <= 1 bounded retry, 0 mutations", () => {

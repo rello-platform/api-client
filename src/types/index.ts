@@ -284,6 +284,7 @@ export {
 export type {
   PlanSwitchInterval,
   PlanSwitchKeepAddOn,
+  PlanSwitchApps,
   PlanSwitchPreviewQuery,
   PlanSwitchPreviewLine,
   PlanSwitchPreviewSubscription,
@@ -398,6 +399,10 @@ export type {
   PlanTrialStartErrorCode,
   PlanTrialStartError,
 } from "./plan-trial.js";
+
+// UPGRADE-TO-RELLO (KA prompt 1545): the plan class on the plan-grants shapes
+export { PLAN_CLASSES, isPlanClass } from "./plan-class.js";
+export type { PlanClass } from "./plan-class.js";
 
 // PFP Gateway P-2: the embed token (mint, verify) and F2 tenant app access
 export {

@@ -83,6 +83,7 @@ export {
   RelloValidationError,
   RelloRateLimitError,
   RelloUnavailableError,
+  PlanSwitchApiError,
 } from "./errors.js";
 
 // Types
@@ -275,6 +276,7 @@ export type {
   PlanSwitchPreviewLine,
   PlanSwitchPreviewSubscription,
   PlanSwitchPreviewResponse,
+  PlanSwitchApps,
   PlanSwitchRequestParsed,
   PlanSwitchRequest,
   PlanSwitchOperationStatus,
@@ -373,6 +375,8 @@ export type {
 // PFP Gateway G-10R-2t-A: the once-per-tenant Full PFP plan trial (KA prompt 1451)
 export {
   planTrialStateSchema,
+  PLAN_CLASSES,
+  isPlanClass,
   planTrialStartRequestSchema,
   planTrialStartResponseSchema,
   PLAN_TRIAL_START_ERROR_CODES,
@@ -380,6 +384,7 @@ export {
 } from "./types/index.js";
 export type {
   PlanTrialState,
+  PlanClass,
   PlanTrialStartRequest,
   PlanTrialStartResponse,
   PlanTrialStartErrorCode,

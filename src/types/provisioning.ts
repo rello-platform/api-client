@@ -148,6 +148,9 @@ export const tenantPlanGrantsSchema = z.object({
   // PFP Gateway G-10R-2t-A (v2.43.0): the tenant's Full PFP plan trial. null = no trial;
   // ABSENT = an older Rello that does not say (unknown). Never defaulted to null.
   trial: planTrialStateSchema.nullable().optional(),
+  // UPGRADE-TO-RELLO (v2.45.0, ./plan-class.ts): "rello" | "app" today. A plain string like `cause`, so a
+  // later class never refuses the push; compare with isPlanClass(). ABSENT = an older Rello (today's meaning).
+  planClass: z.string().min(1).optional(),
 });
 
 export type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;

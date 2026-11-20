@@ -735,6 +735,555 @@ declare class SettingsResource {
 }
 
 /**
+ * PFP Gateway G-10R + G-EXTRAS (PKG-2): the plan-switch and add-on quantity
+ * contract between Rello's v1 billing routes and PathfinderPro's callers.
+ * Spec SPEC-PFP-GATEWAY.md G-10R (D47, K-248, H-172); plan a7-1147 §F/§P;
+ * Platform KA prompt 1199. One contract, imported by both sides.
+ *
+ * Auth on every route: `Authorization: Bearer <ApiKey>` (Rello's ApiKey table,
+ * targetApp RELLO) plus §4.2's tenant match. The tenant, the Stripe customer,
+ * subscriptions and items are never taken from a body or query.
+ *
+ *   GET   /api/v1/billing/plan-switch/preview?targetPlanSlug=&interval=   (G-10R-2)
+ *   POST  /api/v1/billing/plan-switch                                     (G-10R-2)
+ *   GET   /api/v1/billing/plan-switch/[operationId]                       (G-10R-2)
+ *   PATCH /api/v1/billing/add-on/[addOnId]  + `X-Idempotency-Key` header  (R1, generalized by X1)
+ */
+
+declare const PLAN_SWITCH_INTERVALS: readonly ["month", "year"];
+type PlanSwitchInterval = (typeof PLAN_SWITCH_INTERVALS)[number];
+/**
+ * Add-ons a Pro/Team -> Starter/Rates switch can keep instead of dropping (K1, v2.42.0).
+ * Today only Refi Radar. Absent = drop, exactly as before.
+ */
+declare const PLAN_SWITCH_KEEP_ADDONS: readonly ["refi-radar"];
+type PlanSwitchKeepAddOn = (typeof PLAN_SWITCH_KEEP_ADDONS)[number];
+/**
+ * Query of `GET /api/v1/billing/plan-switch/preview`. `interval` absent = the current one.
+ * `keepAddOns` (v2.42.0): `refi-radar` to keep Refi Radar through the switch; the param may be
+ * repeated in the URL and each value is checked against {@link PLAN_SWITCH_KEEP_ADDONS}; absent = drop.
+ */
+declare const planSwitchPreviewQuerySchema: z.ZodObject<{
+    targetPlanSlug: z.ZodString;
+    interval: z.ZodOptional<z.ZodEnum<{
+        month: "month";
+        year: "year";
+    }>>;
+    keepAddOns: z.ZodOptional<z.ZodEnum<{
+        "refi-radar": "refi-radar";
+    }>>;
+}, z.core.$strict>;
+type PlanSwitchPreviewQuery = z.infer<typeof planSwitchPreviewQuerySchema>;
+/** One line of Stripe's own preview invoice for one subscription. Amounts in the currency's minor unit. */
+interface PlanSwitchPreviewLine {
+    description: string;
+    amount: number;
+    currency: string;
+    /** ISO timestamps. */
+    period: {
+        start: string;
+        end: string;
+    };
+    proration: boolean;
+}
+/** Each subscription that will change gets its own preview; one invoice never covers both. */
+interface PlanSwitchPreviewSubscription {
+    kind: "plan" | "addon";
+    lines: PlanSwitchPreviewLine[];
+    total: number;
+}
+/**
+ * 200 of the preview. Rello stores the preview (with the inputs it was computed
+ * from) and issues `previewId`; a confirmed POST names it, so the numbers the
+ * MLO confirmed are the numbers charged. Valid until `expiresAt`
+ * (= min(prorationDate + 15 min, the plan period end)).
+ */
+interface PlanSwitchPreviewResponse {
+    previewId: string;
+    /** ISO. */
+    expiresAt: string;
+    /** ISO. The proration instant both steps use when the POST names this preview. */
+    prorationDate: string;
+    /** true for Pro/Team → Starter/Rates (D47): the POST must carry this previewId and `confirmedChargeChange: true`. */
+    requiresConfirmation: boolean;
+    subscriptions: PlanSwitchPreviewSubscription[];
+    planChange: {
+        from: string;
+        to: string;
+        fromInterval: PlanSwitchInterval;
+        toInterval: PlanSwitchInterval;
+    };
+    /** `refiRadarKept` (v2.42.0) is present only when the server answers the keep-add-ons question; absent is not `false`. */
+    chargeChange: {
+        carriedCheckYourRateSeat: boolean;
+        refiRadarDrops: boolean;
+        refiRadarKept?: boolean;
+    };
+    /**
+     * v2.45.0 (UPGRADE-TO-RELLO §D3/§D6): the apps the tenant keeps, gains and loses through this switch, by app
+     * slug. ABSENT = an older Rello that does not say (unknown), never "no change".
+     */
+    apps?: PlanSwitchApps;
+    /** v2.45.0: what is charged now, in the currency's minor unit (the sum of `subscriptions[].total`; negative = a credit). Absent = an older Rello. */
+    amountDueNow?: number;
+}
+/** v2.45.0: a plan switch's effect on the tenant's apps, by app slug (Rello's D1 rule, from local rows). */
+interface PlanSwitchApps {
+    kept: string[];
+    added: string[];
+    dropped: string[];
+}
+/**
+ * Body of `POST /api/v1/billing/plan-switch`, as Rello parses it (strict: no
+ * tenant, no D47 options; those are fixed server-side).
+ *
+ * `confirmedChargeChange` is deliberately `unknown` here: a non-boolean must
+ * reach switchPlan()'s `=== true` check and get `confirmation_required`, never a
+ * generic `invalid_body`, and nothing can default it. Callers build the body as
+ * {@link PlanSwitchRequest}.
+ */
+declare const planSwitchRequestSchema: z.ZodObject<{
+    targetPlanSlug: z.ZodString;
+    interval: z.ZodOptional<z.ZodEnum<{
+        month: "month";
+        year: "year";
+    }>>;
+    idempotencyKey: z.ZodString;
+    previewId: z.ZodOptional<z.ZodString>;
+    confirmedChargeChange: z.ZodOptional<z.ZodUnknown>;
+    keepAddOns: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+        "refi-radar": "refi-radar";
+    }>>>;
+}, z.core.$strict>;
+type PlanSwitchRequestParsed = z.infer<typeof planSwitchRequestSchema>;
+/** What PFP sends. A downgrade (D47) carries the preview's `previewId` and `confirmedChargeChange: true`, from the one confirmation screen. */
+interface PlanSwitchRequest {
+    targetPlanSlug: string;
+    interval?: PlanSwitchInterval;
+    idempotencyKey: string;
+    previewId?: string;
+    confirmedChargeChange?: true;
+    /** v2.42.0 (K1): at most one entry, today `["refi-radar"]`. Absent = drop. */
+    keepAddOns?: PlanSwitchKeepAddOn[];
+}
+type PlanSwitchOperationStatus = "OPEN" | "APPLIED" | "FAILED" | "COMPENSATED";
+type PlanSwitchStepState = "PENDING" | "IN_FLIGHT" | "DONE";
+interface PlanSwitchStep {
+    index: number;
+    kind: string;
+    state: PlanSwitchStepState;
+}
+/** 200: the switch finished inside the request. */
+interface PlanSwitchAppliedResponse {
+    operationId: string;
+    status: "APPLIED";
+    steps: PlanSwitchStep[];
+    planSlug: string;
+    interval: PlanSwitchInterval;
+    invoiceIds: string[];
+    /**
+     * v2.45.0 (UPGRADE-TO-RELLO §D7): where to send the person when the target is a Rello plan
+     * (`<Rello origin>/welcome/rello?op=<operationId>`); `null` for any other target. ABSENT = an older Rello.
+     */
+    relloUrl?: string | null;
+}
+/** 202: still running; poll `GET /api/v1/billing/plan-switch/[operationId]`. */
+interface PlanSwitchOpenResponse {
+    operationId: string;
+    status: "OPEN";
+}
+type PlanSwitchResponse = PlanSwitchAppliedResponse | PlanSwitchOpenResponse;
+/** `GET /api/v1/billing/plan-switch/[operationId]`. Another tenant's id answers 404 `operation_not_found`. */
+interface PlanSwitchOperationResponse {
+    operationId: string;
+    status: PlanSwitchOperationStatus;
+    steps: PlanSwitchStep[];
+    previewId: string | null;
+    invoiceIds: string[];
+    resolutionNeeded: boolean;
+    /** ISO, while the provider outcome is unknown; else null. */
+    unknownSince: string | null;
+    /** v2.45.0 (§D7): as on {@link PlanSwitchAppliedResponse}, set once the operation is APPLIED to a Rello plan; else null. ABSENT = an older Rello. */
+    relloUrl?: string | null;
+}
+/**
+ * Every `error` the plan-switch routes answer. Each one is a billing action
+ * refused, never a send gate.
+ *
+ *  400 invalid_body · switch_not_allowed · contact_sales · addon_price_not_configured ·
+ *      confirmation_required (a D47 downgrade without previewId + confirmedChargeChange === true) ·
+ *      addon_not_offered (v2.42.0: keepAddOns names an add-on the tenant doesn't hold, or the target plan can't carry) ·
+ *      no_plan_subscription (v2.45.0: no Stripe customer, or no live plan subscription; send the person to
+ *      /pricing / Checkout instead)
+ *  402 payment_failed (step 1 declined; nothing applied)
+ *  404 operation_not_found
+ *  409 idempotency_key_reused · members_exceed_target · billing_mode_classic · already_on_plan ·
+ *      preview_stale (expired / mismatched / another tenant's / its inputs changed) · preview_consumed ·
+ *      stale_switch · switch_in_progress · use_plan_switch (the subscription PUT and the admin plan
+ *      field for a gateway tenant)
+ *  503 provider_unreadable (outcome unknown: poll the GET) · not_armed (the open rolled back:
+ *      retry with the same idempotencyKey)
+ */
+declare const PLAN_SWITCH_ERROR_CODES: readonly ["invalid_body", "idempotency_key_reused", "switch_not_allowed", "contact_sales", "members_exceed_target", "addon_price_not_configured", "billing_mode_classic", "already_on_plan", "confirmation_required", "preview_stale", "preview_consumed", "stale_switch", "switch_in_progress", "payment_failed", "provider_unreadable", "not_armed", "use_plan_switch", "operation_not_found", "addon_not_offered", "no_plan_subscription"];
+type PlanSwitchErrorCode = (typeof PLAN_SWITCH_ERROR_CODES)[number];
+/**
+ * Why a preview is stale (GD-1778). Optional and additive: an absent reason is
+ * the round-2 meaning (expired or mismatched).
+ *  - inputs_changed: an add-on quantity, a new add-on row or a catalog price id changed
+ *    since the preview. 0 operations and 0 Stripe calls of any kind.
+ *  - provider_changed: Stripe's plan price, period end, an add-on item, or the
+ *    add-on subscription's trial state differs from what the preview read. The shared reader's two reads, each ≤ 1 bounded retry; 0 mutations.
+ *  - expired: past `expiresAt`.
+ * What PFP does for any of them: fetch a fresh preview and confirm again.
+ */
+declare const PREVIEW_STALE_REASONS: readonly ["inputs_changed", "provider_changed", "expired"];
+type PreviewStaleReason = (typeof PREVIEW_STALE_REASONS)[number];
+/**
+ * `409 preview_stale`. `reason` is a plain string on the wire (like `cause`), so
+ * a reason Rello adds later never makes an older PFP refuse the answer; compare
+ * it against {@link PREVIEW_STALE_REASONS}.
+ */
+declare const previewStaleErrorSchema: z.ZodObject<{
+    error: z.ZodLiteral<"preview_stale">;
+    reason: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+type PreviewStaleError = z.infer<typeof previewStaleErrorSchema>;
+/**
+ * `409 members_exceed_target` (KA 1229 ruling for PFP K-345/O-10, 2026-11-17):
+ * the target plan allows fewer logins than the account has active, so the
+ * switch is refused with nothing changed. The counts follow the X1 quantity
+ * PATCH's `members_exceed_quantity` (`{ activeMembers, quantity }`, Rello
+ * src/lib/billing/addon-quantity.ts:297 @be87ded94): `activeMembers` the
+ * active logins now, `targetLimit` what the target plan allows. Exact: no other
+ * field, so a count can never arrive under another name.
+ */
+declare const membersExceedTargetErrorSchema: z.ZodObject<{
+    error: z.ZodLiteral<"members_exceed_target">;
+    activeMembers: z.ZodNumber;
+    targetLimit: z.ZodNumber;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+type MembersExceedTargetError = z.infer<typeof membersExceedTargetErrorSchema>;
+type PlanSwitchError = PreviewStaleError | {
+    error: "switch_in_progress";
+    operationId: string;
+} | MembersExceedTargetError | {
+    error: Exclude<PlanSwitchErrorCode, "preview_stale" | "switch_in_progress" | "members_exceed_target">;
+    message?: string;
+};
+declare const planSwitchPreviewLineSchema: z.ZodObject<{
+    description: z.ZodString;
+    amount: z.ZodNumber;
+    currency: z.ZodString;
+    period: z.ZodObject<{
+        start: z.ZodString;
+        end: z.ZodString;
+    }, z.core.$strip>;
+    proration: z.ZodBoolean;
+}, z.core.$strip>;
+declare const planSwitchPreviewSubscriptionSchema: z.ZodObject<{
+    kind: z.ZodEnum<{
+        plan: "plan";
+        addon: "addon";
+    }>;
+    lines: z.ZodArray<z.ZodObject<{
+        description: z.ZodString;
+        amount: z.ZodNumber;
+        currency: z.ZodString;
+        period: z.ZodObject<{
+            start: z.ZodString;
+            end: z.ZodString;
+        }, z.core.$strip>;
+        proration: z.ZodBoolean;
+    }, z.core.$strip>>;
+    total: z.ZodNumber;
+}, z.core.$strip>;
+/** 200 of GET /api/v1/billing/plan-switch/preview. */
+declare const planSwitchPreviewResponseSchema: z.ZodObject<{
+    previewId: z.ZodString;
+    expiresAt: z.ZodString;
+    prorationDate: z.ZodString;
+    requiresConfirmation: z.ZodBoolean;
+    subscriptions: z.ZodArray<z.ZodObject<{
+        kind: z.ZodEnum<{
+            plan: "plan";
+            addon: "addon";
+        }>;
+        lines: z.ZodArray<z.ZodObject<{
+            description: z.ZodString;
+            amount: z.ZodNumber;
+            currency: z.ZodString;
+            period: z.ZodObject<{
+                start: z.ZodString;
+                end: z.ZodString;
+            }, z.core.$strip>;
+            proration: z.ZodBoolean;
+        }, z.core.$strip>>;
+        total: z.ZodNumber;
+    }, z.core.$strip>>;
+    planChange: z.ZodObject<{
+        from: z.ZodString;
+        to: z.ZodString;
+        fromInterval: z.ZodEnum<{
+            month: "month";
+            year: "year";
+        }>;
+        toInterval: z.ZodEnum<{
+            month: "month";
+            year: "year";
+        }>;
+    }, z.core.$strip>;
+    chargeChange: z.ZodObject<{
+        carriedCheckYourRateSeat: z.ZodBoolean;
+        refiRadarDrops: z.ZodBoolean;
+        refiRadarKept: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>;
+    apps: z.ZodOptional<z.ZodObject<{
+        kept: z.ZodArray<z.ZodString>;
+        added: z.ZodArray<z.ZodString>;
+        dropped: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>>;
+    amountDueNow: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+declare const planSwitchStepSchema: z.ZodObject<{
+    index: z.ZodNumber;
+    kind: z.ZodString;
+    state: z.ZodEnum<{
+        PENDING: "PENDING";
+        IN_FLIGHT: "IN_FLIGHT";
+        DONE: "DONE";
+    }>;
+}, z.core.$strip>;
+/** 200 of POST /api/v1/billing/plan-switch: finished inside the request. */
+declare const planSwitchAppliedResponseSchema: z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"APPLIED">;
+    steps: z.ZodArray<z.ZodObject<{
+        index: z.ZodNumber;
+        kind: z.ZodString;
+        state: z.ZodEnum<{
+            PENDING: "PENDING";
+            IN_FLIGHT: "IN_FLIGHT";
+            DONE: "DONE";
+        }>;
+    }, z.core.$strip>>;
+    planSlug: z.ZodString;
+    interval: z.ZodEnum<{
+        month: "month";
+        year: "year";
+    }>;
+    invoiceIds: z.ZodArray<z.ZodString>;
+    relloUrl: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$strip>;
+/** 202 of POST /api/v1/billing/plan-switch: still running; poll the operation. */
+declare const planSwitchOpenResponseSchema: z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"OPEN">;
+}, z.core.$strip>;
+declare const planSwitchResponseSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"APPLIED">;
+    steps: z.ZodArray<z.ZodObject<{
+        index: z.ZodNumber;
+        kind: z.ZodString;
+        state: z.ZodEnum<{
+            PENDING: "PENDING";
+            IN_FLIGHT: "IN_FLIGHT";
+            DONE: "DONE";
+        }>;
+    }, z.core.$strip>>;
+    planSlug: z.ZodString;
+    interval: z.ZodEnum<{
+        month: "month";
+        year: "year";
+    }>;
+    invoiceIds: z.ZodArray<z.ZodString>;
+    relloUrl: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$strip>, z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodLiteral<"OPEN">;
+}, z.core.$strip>], "status">;
+/** 200 of GET /api/v1/billing/plan-switch/[operationId]. */
+declare const planSwitchOperationResponseSchema: z.ZodObject<{
+    operationId: z.ZodString;
+    status: z.ZodEnum<{
+        OPEN: "OPEN";
+        APPLIED: "APPLIED";
+        FAILED: "FAILED";
+        COMPENSATED: "COMPENSATED";
+    }>;
+    steps: z.ZodArray<z.ZodObject<{
+        index: z.ZodNumber;
+        kind: z.ZodString;
+        state: z.ZodEnum<{
+            PENDING: "PENDING";
+            IN_FLIGHT: "IN_FLIGHT";
+            DONE: "DONE";
+        }>;
+    }, z.core.$strip>>;
+    previewId: z.ZodNullable<z.ZodString>;
+    invoiceIds: z.ZodArray<z.ZodString>;
+    resolutionNeeded: z.ZodBoolean;
+    unknownSince: z.ZodNullable<z.ZodString>;
+    relloUrl: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$strip>;
+/** `409 switch_in_progress`: another switch for this tenant is running; poll it. */
+declare const switchInProgressErrorSchema: z.ZodObject<{
+    error: z.ZodLiteral<"switch_in_progress">;
+    operationId: z.ZodString;
+}, z.core.$strip>;
+type SwitchInProgressError = z.infer<typeof switchInProgressErrorSchema>;
+/**
+ * The plan-switch codes that have their own exact schema. A body naming one of
+ * these is that refusal or nothing: it never parses through the open branch
+ * below (AUDIT 111 GD-2146, KA 1275).
+ */
+declare const PLAN_SWITCH_DEDICATED_ERROR_CODES: readonly ["members_exceed_target", "preview_stale", "switch_in_progress"];
+/**
+ * Any OTHER plan-switch refusal: `{ error: <code>, message? }`, for every code
+ * that has no dedicated schema. `error` is a plain string on the wire (like
+ * preview_stale's `reason`), so a code Rello adds later is still an answer;
+ * compare it against {@link PLAN_SWITCH_ERROR_CODES}. Extra fields are kept.
+ * A code in {@link PLAN_SWITCH_DEDICATED_ERROR_CODES} is refused here: it must
+ * pass its own schema.
+ */
+declare const planSwitchOtherErrorSchema: z.ZodObject<{
+    error: z.ZodString;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>;
+type PlanSwitchOtherError = z.infer<typeof planSwitchOtherErrorSchema>;
+/**
+ * Every plan-switch refusal. A body naming `members_exceed_target`,
+ * `preview_stale` or `switch_in_progress` parses only through that code's own
+ * schema, so a malformed one (missing or negative counts, a non-string reason,
+ * no operationId) is refused, never accepted through the open branch. Any other
+ * code, a future one included, parses through the open branch.
+ */
+declare const planSwitchErrorSchema: z.ZodUnion<readonly [z.ZodObject<{
+    error: z.ZodLiteral<"members_exceed_target">;
+    activeMembers: z.ZodNumber;
+    targetLimit: z.ZodNumber;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>, z.ZodObject<{
+    error: z.ZodLiteral<"preview_stale">;
+    reason: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    error: z.ZodLiteral<"switch_in_progress">;
+    operationId: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    error: z.ZodString;
+    message: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>]>;
+declare function isMembersExceedTargetError(e: unknown): e is MembersExceedTargetError;
+/**
+ * The idempotency key travels in this header, 8–128 characters (R1's
+ * `src/lib/billing/v1/idempotency-header.ts`). A missing or malformed one is
+ * refused before anything else (`IDEMPOTENCY_KEY_REQUIRED` / `_INVALID`).
+ */
+declare const ADDON_QUANTITY_IDEMPOTENCY_HEADER: "X-Idempotency-Key";
+declare const ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: Readonly<{
+    readonly min: 8;
+    readonly max: 128;
+}>;
+/**
+ * Body of `PATCH /api/v1/billing/add-on/[addOnId]`. `quantity` is absolute
+ * (0 removes the item); `quantityRev` is the caller's monotonic revision, a
+ * non-negative number or, past 2^53, a digit string. The key travels in the
+ * {@link ADDON_QUANTITY_IDEMPOTENCY_HEADER} header. Strict: the tenant comes from auth.
+ */
+declare const addOnQuantityRequestSchema: z.ZodObject<{
+    quantity: z.ZodNumber;
+    quantityRev: z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>;
+}, z.core.$strict>;
+type AddOnQuantityRequest = z.infer<typeof addOnQuantityRequestSchema>;
+/**
+ * 200 `{ success: true, data }`. R1 (#2361/#2381) sends the first five fields.
+ * `status` and `subscriptionCanceled` are added by X1 (the generic PATCH); a
+ * reader must treat them as absent on an R1 answer.
+ */
+declare const addOnQuantityResponseSchema: z.ZodObject<{
+    tenantAddOnId: z.ZodString;
+    quantity: z.ZodNumber;
+    quantityRev: z.ZodString;
+    billedQuantity: z.ZodNumber;
+    superseded: z.ZodBoolean;
+    status: z.ZodOptional<z.ZodString>;
+    subscriptionCanceled: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>;
+type AddOnQuantityResponse = z.infer<typeof addOnQuantityResponseSchema>;
+/**
+ * The domain `code`s the quantity PATCH answers. Each refuses a billing action;
+ * none is a send gate.
+ *
+ *  409 members_exceed_quantity    pfp-extra-team-login below the active login members
+ *                                  (`{ activeMembers, quantity }`); 0 Stripe calls (X1)
+ *  409 extra_mlos_exceed_quantity pfp-extra-signature below the active loginless MLOs
+ *                                  (`{ activeLoginless, quantity }`); 0 Stripe calls (X1)
+ *  409 stale_quantity_rev · 400 contact_sales (above the add-on's maxQuantity) ·
+ *  400 included_in_plan (Refi Radar on Pro/Team) · addon_price_not_configured
+ *  R1's own: 404 addon_not_found · 409 addon_not_active · 409 addon_state_unknown ·
+ *  409 quantity_not_supported · 402 payment_method_required · 502 stripe_failed
+ */
+declare const ADDON_QUANTITY_ERROR_CODES: readonly ["members_exceed_quantity", "extra_mlos_exceed_quantity", "stale_quantity_rev", "contact_sales", "included_in_plan", "addon_price_not_configured", "addon_not_found", "addon_not_active", "addon_state_unknown", "quantity_not_supported", "payment_method_required", "stripe_failed"];
+type AddOnQuantityErrorCode = (typeof ADDON_QUANTITY_ERROR_CODES)[number];
+/** The idempotency refusals every v1 billing mutation shares (uppercase, as R1 sends them): 400, 400, 422. */
+declare const ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES: readonly ["IDEMPOTENCY_KEY_REQUIRED", "IDEMPOTENCY_KEY_INVALID", "IDEMPOTENCY_KEY_CONFLICT"];
+type AddOnQuantityIdempotencyErrorCode = (typeof ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES)[number];
+/** 409 extra_mlos_exceed_quantity, exactly. */
+declare const extraMlosExceedQuantityErrorSchema: z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"extra_mlos_exceed_quantity">;
+    activeLoginless: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>;
+type ExtraMlosExceedQuantityError = z.infer<typeof extraMlosExceedQuantityErrorSchema>;
+/** 409 members_exceed_quantity, exactly. */
+declare const membersExceedQuantityErrorSchema: z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"members_exceed_quantity">;
+    activeMembers: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>;
+type MembersExceedQuantityError = z.infer<typeof membersExceedQuantityErrorSchema>;
+/**
+ * Any other refusal the route gives. Not every answer carries a `code` or even
+ * `success`: R1's 400 invalid body, 404 add-on not found, 403 other app's
+ * add-on, 500 and 503 send `{ success: false, error }`; requireV1Auth's 401/403
+ * and the tenant-app guard send `{ error }`. A code is one of
+ * {@link ADDON_QUANTITY_ERROR_CODES}, {@link ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES},
+ * or one a later Rello adds; extra fields (e.g. `convergence`) are kept.
+ */
+declare const addOnQuantityOtherErrorSchema: z.ZodObject<{
+    success: z.ZodOptional<z.ZodLiteral<false>>;
+    error: z.ZodString;
+    code: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>;
+type AddOnQuantityOtherError = z.infer<typeof addOnQuantityOtherErrorSchema>;
+/** Every refusal of the quantity PATCH. Narrow the exact domain branches with the guards below. */
+declare const addOnQuantityErrorSchema: z.ZodUnion<readonly [z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"extra_mlos_exceed_quantity">;
+    activeLoginless: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>, z.ZodObject<{
+    success: z.ZodLiteral<false>;
+    error: z.ZodString;
+    code: z.ZodLiteral<"members_exceed_quantity">;
+    activeMembers: z.ZodNumber;
+    quantity: z.ZodNumber;
+}, z.core.$strip>, z.ZodObject<{
+    success: z.ZodOptional<z.ZodLiteral<false>>;
+    error: z.ZodString;
+    code: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>]>;
+type AddOnQuantityError = ExtraMlosExceedQuantityError | MembersExceedQuantityError | AddOnQuantityOtherError;
+declare function isExtraMlosExceedQuantityError(e: unknown): e is ExtraMlosExceedQuantityError;
+declare function isMembersExceedQuantityError(e: unknown): e is MembersExceedQuantityError;
+
+/**
  * PFP Gateway "Match my design" (Platform KA prompt 1419; Kelly D55: a $99
  * one-time charge per request): charge ONE one-time add-on to the tenant's
  * saved card when PathfinderPro asks. One contract for Rello's route and
@@ -927,6 +1476,18 @@ declare class BillingResource {
      * caller's tenant has no charge under that request id.
      */
     getOneTimeAddOnCharge(tenantId: string, requestId: string): Promise<AddOnChargeOnceAnswer>;
+    /** `GET /api/v1/billing/plan-switch/preview`: Stripe's own numbers for the switch, and a `previewId` to confirm with. */
+    previewPlanSwitch(tenantId: string, q: PlanSwitchPreviewQuery): Promise<PlanSwitchPreviewResponse>;
+    /**
+     * `POST /api/v1/billing/plan-switch`. Resolves with APPLIED (200, finished inside the request) or OPEN (202:
+     * poll {@link getPlanSwitch}). The body is checked against the strict request schema first; a body it
+     * refuses sends nothing. Every transport retry sends the same `idempotencyKey`, so a retried POST is the
+     * same switch. ⚠ A RelloUnavailableError (timeout, network) is not "not switched": send the same key again.
+     * An unreadable 2xx body is thrown with statusCode 200 (this client cannot tell a 200 from a 202 there).
+     */
+    switchPlan(tenantId: string, body: PlanSwitchRequest): Promise<PlanSwitchResponse>;
+    /** `GET /api/v1/billing/plan-switch/[operationId]`. Another tenant's id answers 404 `operation_not_found`. */
+    getPlanSwitch(tenantId: string, operationId: string): Promise<PlanSwitchOperationResponse>;
 }
 
 interface CanSendInput {
@@ -2326,6 +2887,29 @@ declare class RelloUnavailableError extends RelloError {
     readonly retryAfter: number;
     constructor(message: string, retryAfter: number);
 }
+/**
+ * A plan-switch route answered 4xx or 5xx (UPGRADE-TO-RELLO §D6, Platform KA prompt 1545). Thrown by
+ * `billing.previewPlanSwitch`, `billing.switchPlan` and `billing.getPlanSwitch` in place of the transport's
+ * RelloError subclass, which stays reachable as `cause` (e.g. a RelloRateLimitError's `retryAfter`).
+ *
+ *  - `status`: the HTTP status (the same number as `statusCode`).
+ *  - `body`: the answer parsed with `planSwitchErrorSchema`: a dedicated refusal exactly, or the open branch
+ *    `{ error, message?, … }` for any other code (a later one included; compare against
+ *    PLAN_SWITCH_ERROR_CODES). `null` when the answer is not a plan-switch refusal at all (an HTML 502, an
+ *    empty body, a malformed dedicated refusal): there is NO code then, and none is made up.
+ *  - `raw`: the body as received (parsed JSON, or the text when it was not JSON; null when empty).
+ *
+ * A request that got no HTTP answer (timeout, network failure, an open circuit) is NOT this error: it stays
+ * RelloUnavailableError, and for `switchPlan` it does not mean "not switched": send the same
+ * `idempotencyKey` again.
+ */
+declare class PlanSwitchApiError extends RelloError {
+    readonly status: number;
+    readonly body: PlanSwitchError | PlanSwitchOtherError | null;
+    readonly raw: unknown;
+    readonly cause: RelloError;
+    constructor(cause: RelloError, body: PlanSwitchError | PlanSwitchOtherError | null);
+}
 
 interface EffectiveSettings {
     settings: Record<string, unknown>;
@@ -2488,6 +3072,7 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
             startedAt: z.ZodString;
             endsAt: z.ZodString;
         }, z.core.$strip>>>;
+        planClass: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         featureSlug: z.ZodString;
@@ -2550,6 +3135,7 @@ declare const tenantPlanGrantsSchema: z.ZodObject<{
         startedAt: z.ZodString;
         endsAt: z.ZodString;
     }, z.core.$strip>>>;
+    planClass: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 type TenantPlanGrants = z.infer<typeof tenantPlanGrantsSchema>;
 /**
@@ -2664,6 +3250,7 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
             startedAt: z.ZodString;
             endsAt: z.ZodString;
         }, z.core.$strip>>>;
+        planClass: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>>;
     cyr: z.ZodOptional<z.ZodNullable<z.ZodLazy<z.ZodObject<{
         featureSlug: z.ZodString;
@@ -3147,8 +3734,8 @@ type SetupChargeRequest = z.infer<typeof setupChargeRequest>;
  * was made"). `refunded`: the fee came back (registration could not complete).
  */
 declare const setupChargeStatus: z.ZodEnum<{
-    failed: "failed";
     unknown: "unknown";
+    failed: "failed";
     manual: "manual";
     pending: "pending";
     paid: "paid";
@@ -3162,8 +3749,8 @@ declare const setupChargeEnvelope: z.ZodObject<{
     relloAgentId: z.ZodString;
     feeSlug: z.ZodString;
     status: z.ZodEnum<{
-        failed: "failed";
         unknown: "unknown";
+        failed: "failed";
         manual: "manual";
         pending: "pending";
         paid: "paid";
@@ -3212,8 +3799,8 @@ declare const chargeConflict: z.ZodObject<{
         relloAgentId: z.ZodString;
         feeSlug: z.ZodString;
         status: z.ZodEnum<{
-            failed: "failed";
             unknown: "unknown";
+            failed: "failed";
             manual: "manual";
             pending: "pending";
             paid: "paid";
@@ -3586,8 +4173,8 @@ declare const setupChargeChangedEvent: z.ZodObject<{
         relloAgentId: z.ZodString;
         feeSlug: z.ZodString;
         status: z.ZodEnum<{
-            failed: "failed";
             unknown: "unknown";
+            failed: "failed";
             manual: "manual";
             pending: "pending";
             paid: "paid";
@@ -3646,524 +4233,6 @@ declare const smsRegistrationChangedEvent: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 type SmsRegistrationChangedEvent = z.infer<typeof smsRegistrationChangedEvent>;
-
-/**
- * PFP Gateway G-10R + G-EXTRAS (PKG-2): the plan-switch and add-on quantity
- * contract between Rello's v1 billing routes and PathfinderPro's callers.
- * Spec SPEC-PFP-GATEWAY.md G-10R (D47, K-248, H-172); plan a7-1147 §F/§P;
- * Platform KA prompt 1199. One contract, imported by both sides.
- *
- * Auth on every route: `Authorization: Bearer <ApiKey>` (Rello's ApiKey table,
- * targetApp RELLO) plus §4.2's tenant match. The tenant, the Stripe customer,
- * subscriptions and items are never taken from a body or query.
- *
- *   GET   /api/v1/billing/plan-switch/preview?targetPlanSlug=&interval=   (G-10R-2)
- *   POST  /api/v1/billing/plan-switch                                     (G-10R-2)
- *   GET   /api/v1/billing/plan-switch/[operationId]                       (G-10R-2)
- *   PATCH /api/v1/billing/add-on/[addOnId]  + `X-Idempotency-Key` header  (R1, generalized by X1)
- */
-
-declare const PLAN_SWITCH_INTERVALS: readonly ["month", "year"];
-type PlanSwitchInterval = (typeof PLAN_SWITCH_INTERVALS)[number];
-/**
- * Add-ons a Pro/Team -> Starter/Rates switch can keep instead of dropping (K1, v2.42.0).
- * Today only Refi Radar. Absent = drop, exactly as before.
- */
-declare const PLAN_SWITCH_KEEP_ADDONS: readonly ["refi-radar"];
-type PlanSwitchKeepAddOn = (typeof PLAN_SWITCH_KEEP_ADDONS)[number];
-/**
- * Query of `GET /api/v1/billing/plan-switch/preview`. `interval` absent = the current one.
- * `keepAddOns` (v2.42.0): `refi-radar` to keep Refi Radar through the switch; the param may be
- * repeated in the URL and each value is checked against {@link PLAN_SWITCH_KEEP_ADDONS}; absent = drop.
- */
-declare const planSwitchPreviewQuerySchema: z.ZodObject<{
-    targetPlanSlug: z.ZodString;
-    interval: z.ZodOptional<z.ZodEnum<{
-        month: "month";
-        year: "year";
-    }>>;
-    keepAddOns: z.ZodOptional<z.ZodEnum<{
-        "refi-radar": "refi-radar";
-    }>>;
-}, z.core.$strict>;
-type PlanSwitchPreviewQuery = z.infer<typeof planSwitchPreviewQuerySchema>;
-/** One line of Stripe's own preview invoice for one subscription. Amounts in the currency's minor unit. */
-interface PlanSwitchPreviewLine {
-    description: string;
-    amount: number;
-    currency: string;
-    /** ISO timestamps. */
-    period: {
-        start: string;
-        end: string;
-    };
-    proration: boolean;
-}
-/** Each subscription that will change gets its own preview; one invoice never covers both. */
-interface PlanSwitchPreviewSubscription {
-    kind: "plan" | "addon";
-    lines: PlanSwitchPreviewLine[];
-    total: number;
-}
-/**
- * 200 of the preview. Rello stores the preview (with the inputs it was computed
- * from) and issues `previewId`; a confirmed POST names it, so the numbers the
- * MLO confirmed are the numbers charged. Valid until `expiresAt`
- * (= min(prorationDate + 15 min, the plan period end)).
- */
-interface PlanSwitchPreviewResponse {
-    previewId: string;
-    /** ISO. */
-    expiresAt: string;
-    /** ISO. The proration instant both steps use when the POST names this preview. */
-    prorationDate: string;
-    /** true for Pro/Team → Starter/Rates (D47): the POST must carry this previewId and `confirmedChargeChange: true`. */
-    requiresConfirmation: boolean;
-    subscriptions: PlanSwitchPreviewSubscription[];
-    planChange: {
-        from: string;
-        to: string;
-        fromInterval: PlanSwitchInterval;
-        toInterval: PlanSwitchInterval;
-    };
-    /** `refiRadarKept` (v2.42.0) is present only when the server answers the keep-add-ons question; absent is not `false`. */
-    chargeChange: {
-        carriedCheckYourRateSeat: boolean;
-        refiRadarDrops: boolean;
-        refiRadarKept?: boolean;
-    };
-}
-/**
- * Body of `POST /api/v1/billing/plan-switch`, as Rello parses it (strict: no
- * tenant, no D47 options; those are fixed server-side).
- *
- * `confirmedChargeChange` is deliberately `unknown` here: a non-boolean must
- * reach switchPlan()'s `=== true` check and get `confirmation_required`, never a
- * generic `invalid_body`, and nothing can default it. Callers build the body as
- * {@link PlanSwitchRequest}.
- */
-declare const planSwitchRequestSchema: z.ZodObject<{
-    targetPlanSlug: z.ZodString;
-    interval: z.ZodOptional<z.ZodEnum<{
-        month: "month";
-        year: "year";
-    }>>;
-    idempotencyKey: z.ZodString;
-    previewId: z.ZodOptional<z.ZodString>;
-    confirmedChargeChange: z.ZodOptional<z.ZodUnknown>;
-    keepAddOns: z.ZodOptional<z.ZodArray<z.ZodEnum<{
-        "refi-radar": "refi-radar";
-    }>>>;
-}, z.core.$strict>;
-type PlanSwitchRequestParsed = z.infer<typeof planSwitchRequestSchema>;
-/** What PFP sends. A downgrade (D47) carries the preview's `previewId` and `confirmedChargeChange: true`, from the one confirmation screen. */
-interface PlanSwitchRequest {
-    targetPlanSlug: string;
-    interval?: PlanSwitchInterval;
-    idempotencyKey: string;
-    previewId?: string;
-    confirmedChargeChange?: true;
-    /** v2.42.0 (K1): at most one entry, today `["refi-radar"]`. Absent = drop. */
-    keepAddOns?: PlanSwitchKeepAddOn[];
-}
-type PlanSwitchOperationStatus = "OPEN" | "APPLIED" | "FAILED" | "COMPENSATED";
-type PlanSwitchStepState = "PENDING" | "IN_FLIGHT" | "DONE";
-interface PlanSwitchStep {
-    index: number;
-    kind: string;
-    state: PlanSwitchStepState;
-}
-/** 200: the switch finished inside the request. */
-interface PlanSwitchAppliedResponse {
-    operationId: string;
-    status: "APPLIED";
-    steps: PlanSwitchStep[];
-    planSlug: string;
-    interval: PlanSwitchInterval;
-    invoiceIds: string[];
-}
-/** 202: still running; poll `GET /api/v1/billing/plan-switch/[operationId]`. */
-interface PlanSwitchOpenResponse {
-    operationId: string;
-    status: "OPEN";
-}
-type PlanSwitchResponse = PlanSwitchAppliedResponse | PlanSwitchOpenResponse;
-/** `GET /api/v1/billing/plan-switch/[operationId]`. Another tenant's id answers 404 `operation_not_found`. */
-interface PlanSwitchOperationResponse {
-    operationId: string;
-    status: PlanSwitchOperationStatus;
-    steps: PlanSwitchStep[];
-    previewId: string | null;
-    invoiceIds: string[];
-    resolutionNeeded: boolean;
-    /** ISO, while the provider outcome is unknown; else null. */
-    unknownSince: string | null;
-}
-/**
- * Every `error` the plan-switch routes answer. Each one is a billing action
- * refused, never a send gate.
- *
- *  400 invalid_body · switch_not_allowed · contact_sales · addon_price_not_configured ·
- *      confirmation_required (a D47 downgrade without previewId + confirmedChargeChange === true) ·
- *      addon_not_offered (v2.42.0: keepAddOns names an add-on the tenant doesn't hold, or the target plan can't carry)
- *  402 payment_failed (step 1 declined; nothing applied)
- *  404 operation_not_found
- *  409 idempotency_key_reused · members_exceed_target · billing_mode_classic · already_on_plan ·
- *      preview_stale (expired / mismatched / another tenant's / its inputs changed) · preview_consumed ·
- *      stale_switch · switch_in_progress · use_plan_switch (the subscription PUT and the admin plan
- *      field for a gateway tenant)
- *  503 provider_unreadable (outcome unknown: poll the GET) · not_armed (the open rolled back:
- *      retry with the same idempotencyKey)
- */
-declare const PLAN_SWITCH_ERROR_CODES: readonly ["invalid_body", "idempotency_key_reused", "switch_not_allowed", "contact_sales", "members_exceed_target", "addon_price_not_configured", "billing_mode_classic", "already_on_plan", "confirmation_required", "preview_stale", "preview_consumed", "stale_switch", "switch_in_progress", "payment_failed", "provider_unreadable", "not_armed", "use_plan_switch", "operation_not_found", "addon_not_offered"];
-type PlanSwitchErrorCode = (typeof PLAN_SWITCH_ERROR_CODES)[number];
-/**
- * Why a preview is stale (GD-1778). Optional and additive: an absent reason is
- * the round-2 meaning (expired or mismatched).
- *  - inputs_changed: an add-on quantity, a new add-on row or a catalog price id changed
- *    since the preview. 0 operations and 0 Stripe calls of any kind.
- *  - provider_changed: Stripe's plan price, period end, an add-on item, or the
- *    add-on subscription's trial state differs from what the preview read. The shared reader's two reads, each ≤ 1 bounded retry; 0 mutations.
- *  - expired: past `expiresAt`.
- * What PFP does for any of them: fetch a fresh preview and confirm again.
- */
-declare const PREVIEW_STALE_REASONS: readonly ["inputs_changed", "provider_changed", "expired"];
-type PreviewStaleReason = (typeof PREVIEW_STALE_REASONS)[number];
-/**
- * `409 preview_stale`. `reason` is a plain string on the wire (like `cause`), so
- * a reason Rello adds later never makes an older PFP refuse the answer; compare
- * it against {@link PREVIEW_STALE_REASONS}.
- */
-declare const previewStaleErrorSchema: z.ZodObject<{
-    error: z.ZodLiteral<"preview_stale">;
-    reason: z.ZodOptional<z.ZodString>;
-}, z.core.$strip>;
-type PreviewStaleError = z.infer<typeof previewStaleErrorSchema>;
-/**
- * `409 members_exceed_target` (KA 1229 ruling for PFP K-345/O-10, 2026-11-17):
- * the target plan allows fewer logins than the account has active, so the
- * switch is refused with nothing changed. The counts follow the X1 quantity
- * PATCH's `members_exceed_quantity` (`{ activeMembers, quantity }`, Rello
- * src/lib/billing/addon-quantity.ts:297 @be87ded94): `activeMembers` the
- * active logins now, `targetLimit` what the target plan allows. Exact: no other
- * field, so a count can never arrive under another name.
- */
-declare const membersExceedTargetErrorSchema: z.ZodObject<{
-    error: z.ZodLiteral<"members_exceed_target">;
-    activeMembers: z.ZodNumber;
-    targetLimit: z.ZodNumber;
-    message: z.ZodOptional<z.ZodString>;
-}, z.core.$strict>;
-type MembersExceedTargetError = z.infer<typeof membersExceedTargetErrorSchema>;
-type PlanSwitchError = PreviewStaleError | {
-    error: "switch_in_progress";
-    operationId: string;
-} | MembersExceedTargetError | {
-    error: Exclude<PlanSwitchErrorCode, "preview_stale" | "switch_in_progress" | "members_exceed_target">;
-    message?: string;
-};
-declare const planSwitchPreviewLineSchema: z.ZodObject<{
-    description: z.ZodString;
-    amount: z.ZodNumber;
-    currency: z.ZodString;
-    period: z.ZodObject<{
-        start: z.ZodString;
-        end: z.ZodString;
-    }, z.core.$strip>;
-    proration: z.ZodBoolean;
-}, z.core.$strip>;
-declare const planSwitchPreviewSubscriptionSchema: z.ZodObject<{
-    kind: z.ZodEnum<{
-        plan: "plan";
-        addon: "addon";
-    }>;
-    lines: z.ZodArray<z.ZodObject<{
-        description: z.ZodString;
-        amount: z.ZodNumber;
-        currency: z.ZodString;
-        period: z.ZodObject<{
-            start: z.ZodString;
-            end: z.ZodString;
-        }, z.core.$strip>;
-        proration: z.ZodBoolean;
-    }, z.core.$strip>>;
-    total: z.ZodNumber;
-}, z.core.$strip>;
-/** 200 of GET /api/v1/billing/plan-switch/preview. */
-declare const planSwitchPreviewResponseSchema: z.ZodObject<{
-    previewId: z.ZodString;
-    expiresAt: z.ZodString;
-    prorationDate: z.ZodString;
-    requiresConfirmation: z.ZodBoolean;
-    subscriptions: z.ZodArray<z.ZodObject<{
-        kind: z.ZodEnum<{
-            plan: "plan";
-            addon: "addon";
-        }>;
-        lines: z.ZodArray<z.ZodObject<{
-            description: z.ZodString;
-            amount: z.ZodNumber;
-            currency: z.ZodString;
-            period: z.ZodObject<{
-                start: z.ZodString;
-                end: z.ZodString;
-            }, z.core.$strip>;
-            proration: z.ZodBoolean;
-        }, z.core.$strip>>;
-        total: z.ZodNumber;
-    }, z.core.$strip>>;
-    planChange: z.ZodObject<{
-        from: z.ZodString;
-        to: z.ZodString;
-        fromInterval: z.ZodEnum<{
-            month: "month";
-            year: "year";
-        }>;
-        toInterval: z.ZodEnum<{
-            month: "month";
-            year: "year";
-        }>;
-    }, z.core.$strip>;
-    chargeChange: z.ZodObject<{
-        carriedCheckYourRateSeat: z.ZodBoolean;
-        refiRadarDrops: z.ZodBoolean;
-        refiRadarKept: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strip>;
-}, z.core.$strip>;
-declare const planSwitchStepSchema: z.ZodObject<{
-    index: z.ZodNumber;
-    kind: z.ZodString;
-    state: z.ZodEnum<{
-        PENDING: "PENDING";
-        IN_FLIGHT: "IN_FLIGHT";
-        DONE: "DONE";
-    }>;
-}, z.core.$strip>;
-/** 200 of POST /api/v1/billing/plan-switch: finished inside the request. */
-declare const planSwitchAppliedResponseSchema: z.ZodObject<{
-    operationId: z.ZodString;
-    status: z.ZodLiteral<"APPLIED">;
-    steps: z.ZodArray<z.ZodObject<{
-        index: z.ZodNumber;
-        kind: z.ZodString;
-        state: z.ZodEnum<{
-            PENDING: "PENDING";
-            IN_FLIGHT: "IN_FLIGHT";
-            DONE: "DONE";
-        }>;
-    }, z.core.$strip>>;
-    planSlug: z.ZodString;
-    interval: z.ZodEnum<{
-        month: "month";
-        year: "year";
-    }>;
-    invoiceIds: z.ZodArray<z.ZodString>;
-}, z.core.$strip>;
-/** 202 of POST /api/v1/billing/plan-switch: still running; poll the operation. */
-declare const planSwitchOpenResponseSchema: z.ZodObject<{
-    operationId: z.ZodString;
-    status: z.ZodLiteral<"OPEN">;
-}, z.core.$strip>;
-declare const planSwitchResponseSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
-    operationId: z.ZodString;
-    status: z.ZodLiteral<"APPLIED">;
-    steps: z.ZodArray<z.ZodObject<{
-        index: z.ZodNumber;
-        kind: z.ZodString;
-        state: z.ZodEnum<{
-            PENDING: "PENDING";
-            IN_FLIGHT: "IN_FLIGHT";
-            DONE: "DONE";
-        }>;
-    }, z.core.$strip>>;
-    planSlug: z.ZodString;
-    interval: z.ZodEnum<{
-        month: "month";
-        year: "year";
-    }>;
-    invoiceIds: z.ZodArray<z.ZodString>;
-}, z.core.$strip>, z.ZodObject<{
-    operationId: z.ZodString;
-    status: z.ZodLiteral<"OPEN">;
-}, z.core.$strip>], "status">;
-/** 200 of GET /api/v1/billing/plan-switch/[operationId]. */
-declare const planSwitchOperationResponseSchema: z.ZodObject<{
-    operationId: z.ZodString;
-    status: z.ZodEnum<{
-        OPEN: "OPEN";
-        APPLIED: "APPLIED";
-        FAILED: "FAILED";
-        COMPENSATED: "COMPENSATED";
-    }>;
-    steps: z.ZodArray<z.ZodObject<{
-        index: z.ZodNumber;
-        kind: z.ZodString;
-        state: z.ZodEnum<{
-            PENDING: "PENDING";
-            IN_FLIGHT: "IN_FLIGHT";
-            DONE: "DONE";
-        }>;
-    }, z.core.$strip>>;
-    previewId: z.ZodNullable<z.ZodString>;
-    invoiceIds: z.ZodArray<z.ZodString>;
-    resolutionNeeded: z.ZodBoolean;
-    unknownSince: z.ZodNullable<z.ZodString>;
-}, z.core.$strip>;
-/** `409 switch_in_progress`: another switch for this tenant is running; poll it. */
-declare const switchInProgressErrorSchema: z.ZodObject<{
-    error: z.ZodLiteral<"switch_in_progress">;
-    operationId: z.ZodString;
-}, z.core.$strip>;
-type SwitchInProgressError = z.infer<typeof switchInProgressErrorSchema>;
-/**
- * The plan-switch codes that have their own exact schema. A body naming one of
- * these is that refusal or nothing: it never parses through the open branch
- * below (AUDIT 111 GD-2146, KA 1275).
- */
-declare const PLAN_SWITCH_DEDICATED_ERROR_CODES: readonly ["members_exceed_target", "preview_stale", "switch_in_progress"];
-/**
- * Any OTHER plan-switch refusal: `{ error: <code>, message? }`, for every code
- * that has no dedicated schema. `error` is a plain string on the wire (like
- * preview_stale's `reason`), so a code Rello adds later is still an answer;
- * compare it against {@link PLAN_SWITCH_ERROR_CODES}. Extra fields are kept.
- * A code in {@link PLAN_SWITCH_DEDICATED_ERROR_CODES} is refused here: it must
- * pass its own schema.
- */
-declare const planSwitchOtherErrorSchema: z.ZodObject<{
-    error: z.ZodString;
-    message: z.ZodOptional<z.ZodString>;
-}, z.core.$loose>;
-type PlanSwitchOtherError = z.infer<typeof planSwitchOtherErrorSchema>;
-/**
- * Every plan-switch refusal. A body naming `members_exceed_target`,
- * `preview_stale` or `switch_in_progress` parses only through that code's own
- * schema, so a malformed one (missing or negative counts, a non-string reason,
- * no operationId) is refused, never accepted through the open branch. Any other
- * code, a future one included, parses through the open branch.
- */
-declare const planSwitchErrorSchema: z.ZodUnion<readonly [z.ZodObject<{
-    error: z.ZodLiteral<"members_exceed_target">;
-    activeMembers: z.ZodNumber;
-    targetLimit: z.ZodNumber;
-    message: z.ZodOptional<z.ZodString>;
-}, z.core.$strict>, z.ZodObject<{
-    error: z.ZodLiteral<"preview_stale">;
-    reason: z.ZodOptional<z.ZodString>;
-}, z.core.$strip>, z.ZodObject<{
-    error: z.ZodLiteral<"switch_in_progress">;
-    operationId: z.ZodString;
-}, z.core.$strip>, z.ZodObject<{
-    error: z.ZodString;
-    message: z.ZodOptional<z.ZodString>;
-}, z.core.$loose>]>;
-declare function isMembersExceedTargetError(e: unknown): e is MembersExceedTargetError;
-/**
- * The idempotency key travels in this header, 8–128 characters (R1's
- * `src/lib/billing/v1/idempotency-header.ts`). A missing or malformed one is
- * refused before anything else (`IDEMPOTENCY_KEY_REQUIRED` / `_INVALID`).
- */
-declare const ADDON_QUANTITY_IDEMPOTENCY_HEADER: "X-Idempotency-Key";
-declare const ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH: Readonly<{
-    readonly min: 8;
-    readonly max: 128;
-}>;
-/**
- * Body of `PATCH /api/v1/billing/add-on/[addOnId]`. `quantity` is absolute
- * (0 removes the item); `quantityRev` is the caller's monotonic revision, a
- * non-negative number or, past 2^53, a digit string. The key travels in the
- * {@link ADDON_QUANTITY_IDEMPOTENCY_HEADER} header. Strict: the tenant comes from auth.
- */
-declare const addOnQuantityRequestSchema: z.ZodObject<{
-    quantity: z.ZodNumber;
-    quantityRev: z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>;
-}, z.core.$strict>;
-type AddOnQuantityRequest = z.infer<typeof addOnQuantityRequestSchema>;
-/**
- * 200 `{ success: true, data }`. R1 (#2361/#2381) sends the first five fields.
- * `status` and `subscriptionCanceled` are added by X1 (the generic PATCH); a
- * reader must treat them as absent on an R1 answer.
- */
-declare const addOnQuantityResponseSchema: z.ZodObject<{
-    tenantAddOnId: z.ZodString;
-    quantity: z.ZodNumber;
-    quantityRev: z.ZodString;
-    billedQuantity: z.ZodNumber;
-    superseded: z.ZodBoolean;
-    status: z.ZodOptional<z.ZodString>;
-    subscriptionCanceled: z.ZodOptional<z.ZodBoolean>;
-}, z.core.$strip>;
-type AddOnQuantityResponse = z.infer<typeof addOnQuantityResponseSchema>;
-/**
- * The domain `code`s the quantity PATCH answers. Each refuses a billing action;
- * none is a send gate.
- *
- *  409 members_exceed_quantity    pfp-extra-team-login below the active login members
- *                                  (`{ activeMembers, quantity }`); 0 Stripe calls (X1)
- *  409 extra_mlos_exceed_quantity pfp-extra-signature below the active loginless MLOs
- *                                  (`{ activeLoginless, quantity }`); 0 Stripe calls (X1)
- *  409 stale_quantity_rev · 400 contact_sales (above the add-on's maxQuantity) ·
- *  400 included_in_plan (Refi Radar on Pro/Team) · addon_price_not_configured
- *  R1's own: 404 addon_not_found · 409 addon_not_active · 409 addon_state_unknown ·
- *  409 quantity_not_supported · 402 payment_method_required · 502 stripe_failed
- */
-declare const ADDON_QUANTITY_ERROR_CODES: readonly ["members_exceed_quantity", "extra_mlos_exceed_quantity", "stale_quantity_rev", "contact_sales", "included_in_plan", "addon_price_not_configured", "addon_not_found", "addon_not_active", "addon_state_unknown", "quantity_not_supported", "payment_method_required", "stripe_failed"];
-type AddOnQuantityErrorCode = (typeof ADDON_QUANTITY_ERROR_CODES)[number];
-/** The idempotency refusals every v1 billing mutation shares (uppercase, as R1 sends them): 400, 400, 422. */
-declare const ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES: readonly ["IDEMPOTENCY_KEY_REQUIRED", "IDEMPOTENCY_KEY_INVALID", "IDEMPOTENCY_KEY_CONFLICT"];
-type AddOnQuantityIdempotencyErrorCode = (typeof ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES)[number];
-/** 409 extra_mlos_exceed_quantity, exactly. */
-declare const extraMlosExceedQuantityErrorSchema: z.ZodObject<{
-    success: z.ZodLiteral<false>;
-    error: z.ZodString;
-    code: z.ZodLiteral<"extra_mlos_exceed_quantity">;
-    activeLoginless: z.ZodNumber;
-    quantity: z.ZodNumber;
-}, z.core.$strip>;
-type ExtraMlosExceedQuantityError = z.infer<typeof extraMlosExceedQuantityErrorSchema>;
-/** 409 members_exceed_quantity, exactly. */
-declare const membersExceedQuantityErrorSchema: z.ZodObject<{
-    success: z.ZodLiteral<false>;
-    error: z.ZodString;
-    code: z.ZodLiteral<"members_exceed_quantity">;
-    activeMembers: z.ZodNumber;
-    quantity: z.ZodNumber;
-}, z.core.$strip>;
-type MembersExceedQuantityError = z.infer<typeof membersExceedQuantityErrorSchema>;
-/**
- * Any other refusal the route gives. Not every answer carries a `code` or even
- * `success`: R1's 400 invalid body, 404 add-on not found, 403 other app's
- * add-on, 500 and 503 send `{ success: false, error }`; requireV1Auth's 401/403
- * and the tenant-app guard send `{ error }`. A code is one of
- * {@link ADDON_QUANTITY_ERROR_CODES}, {@link ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES},
- * or one a later Rello adds; extra fields (e.g. `convergence`) are kept.
- */
-declare const addOnQuantityOtherErrorSchema: z.ZodObject<{
-    success: z.ZodOptional<z.ZodLiteral<false>>;
-    error: z.ZodString;
-    code: z.ZodOptional<z.ZodString>;
-}, z.core.$loose>;
-type AddOnQuantityOtherError = z.infer<typeof addOnQuantityOtherErrorSchema>;
-/** Every refusal of the quantity PATCH. Narrow the exact domain branches with the guards below. */
-declare const addOnQuantityErrorSchema: z.ZodUnion<readonly [z.ZodObject<{
-    success: z.ZodLiteral<false>;
-    error: z.ZodString;
-    code: z.ZodLiteral<"extra_mlos_exceed_quantity">;
-    activeLoginless: z.ZodNumber;
-    quantity: z.ZodNumber;
-}, z.core.$strip>, z.ZodObject<{
-    success: z.ZodLiteral<false>;
-    error: z.ZodString;
-    code: z.ZodLiteral<"members_exceed_quantity">;
-    activeMembers: z.ZodNumber;
-    quantity: z.ZodNumber;
-}, z.core.$strip>, z.ZodObject<{
-    success: z.ZodOptional<z.ZodLiteral<false>>;
-    error: z.ZodString;
-    code: z.ZodOptional<z.ZodString>;
-}, z.core.$loose>]>;
-type AddOnQuantityError = ExtraMlosExceedQuantityError | MembersExceedQuantityError | AddOnQuantityOtherError;
-declare function isExtraMlosExceedQuantityError(e: unknown): e is ExtraMlosExceedQuantityError;
-declare function isMembersExceedQuantityError(e: unknown): e is MembersExceedQuantityError;
 
 /**
  * PFP Gateway P-1: Rello's tenant-bound v1 billing reads (SPEC-PFP-GATEWAY.md
@@ -4239,6 +4308,7 @@ declare const planGrantsReadResponseSchema: z.ZodObject<{
         startedAt: z.ZodString;
         endsAt: z.ZodString;
     }, z.core.$strip>>>;
+    planClass: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 type PlanGrantsReadResponse = z.infer<typeof planGrantsReadResponseSchema>;
 /**
@@ -4528,6 +4598,24 @@ declare const planTrialStartErrorSchema: z.ZodObject<{
 type PlanTrialStartError = z.infer<typeof planTrialStartErrorSchema>;
 
 /**
+ * UPGRADE-TO-RELLO (Platform KA prompt 1545; design §D3(ii) G-1, KA ruling 1541): whether the tenant's plan
+ * is a Rello plan (`features ? rello`) or a single app's plan. Rello sends it as `planClass` on the
+ * plan-grants shapes (the enable push's `planGrants` and `GET /api/v1/billing/plan-grants`) and on
+ * `billing.plan_grants_changed`.
+ *
+ * What PathfinderPro does with it (the A4 contract): a gateway tenant whose grant state carries
+ * `planClass: "rello"` resolves to full mode. An ABSENT `planClass` keeps today's meaning, and a value not in
+ * {@link PLAN_CLASSES} is UNKNOWN (never "app", never "rello").
+ *
+ * On the wire it is a plain string, like `cause` on the same shapes: a class Rello adds later must never make
+ * an older receiver refuse the whole grant push. Compare with {@link isPlanClass}.
+ */
+declare const PLAN_CLASSES: readonly ["rello", "app"];
+type PlanClass = (typeof PLAN_CLASSES)[number];
+/** True only for a class this release knows. Anything else (a later class, "", null, a number) is unknown. */
+declare function isPlanClass(value: unknown): value is PlanClass;
+
+/**
  * PFP Gateway P-2: the embed token and F2 (tenant app access). One contract for
  * Rello's v1 routes and their two callers, PathfinderPro and Home Scout.
  * Map MAP-P2-EMBED-TOKEN-F2-261118.md
@@ -4778,4 +4866,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, ADD_ONS_READ_ERROR_CODES, ADD_ON_CHARGE_ONCE_ERROR_CODES, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS, ADD_ON_CHARGE_ONCE_MANUAL_REASONS, ADD_ON_START_ERROR_CODES, ADD_ON_START_IDEMPOTENCY_HEADER, type AddOnChargeOnceAnswer, type AddOnChargeOnceCharged, type AddOnChargeOnceDeclined, type AddOnChargeOnceError, type AddOnChargeOnceErrorCode, type AddOnChargeOnceManual, type AddOnChargeOnceManualReason, type AddOnChargeOnceQuery, type AddOnChargeOnceRequest, type AddOnChargeOnceUnknown, type AddOnOneTimePrice, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddOnStartError, type AddOnStartErrorCode, type AddOnStartRequest, type AddOnStartResponse, type AddOnUnitPrice, type AddOnsReadError, type AddOnsReadErrorCode, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, EMBED_SESSION_EXPIRED_MESSAGE, EMBED_SURFACES, EMBED_SURFACE_SCOPE, EMBED_TOKEN_AUDIENCE, EMBED_TOKEN_ERRORS, EMBED_TOKEN_ERROR_STATUS, EMBED_TOKEN_INVALID_REASONS, EMBED_TOKEN_MESSAGE, EMBED_TOKEN_PREFIX, EMBED_TOKEN_REFRESH_MESSAGE, EMBED_TOKEN_SCOPES, type EffectiveSettings, type EmbedSurface, type EmbedTokenErrorCode, type EmbedTokenInvalidReason, type EmbedTokenMintRequest, type EmbedTokenMintResponse, type EmbedTokenScope, type EmbedTokenVerifyInvalid, type EmbedTokenVerifyRequest, type EmbedTokenVerifyResponse, type EmbedTokenVerifyValid, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MembersExceedTargetError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_GRANTS_READ_ERROR_CODES, PLAN_SWITCH_DEDICATED_ERROR_CODES, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PLAN_SWITCH_KEEP_ADDONS, PLAN_TRIAL_START_ERROR_CODES, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanGrantsReadError, type PlanGrantsReadErrorCode, type PlanGrantsReadResponse, type PlanSwitchAppliedResponse, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchKeepAddOn, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchOtherError, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlanTrialStartError, type PlanTrialStartErrorCode, type PlanTrialStartRequest, type PlanTrialStartResponse, type PlanTrialState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type RosterErrorParsed, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type SwitchInProgressError, TENANT_ADD_ON_STATUSES, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantAppAccessResponse, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type V1AddOnRead, type V1AddOnTenantSubscription, type V1AddOnsReadResponse, type V1TenantMatchError, V1_TENANT_MATCH_ERRORS, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnChargeOnceAnswerSchema, addOnChargeOnceChargedSchema, addOnChargeOnceDeclinedSchema, addOnChargeOnceErrorSchema, addOnChargeOnceManualSchema, addOnChargeOnceQuerySchema, addOnChargeOnceRequestIdSchema, addOnChargeOnceRequestSchema, addOnChargeOnceUnknownSchema, addOnOneTimePriceSchema, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, addOnStartErrorSchema, addOnStartRequestSchema, addOnStartResponseSchema, addOnUnitPriceSchema, addOnsReadErrorSchema, agentProvisionPayloadSchema, alreadyMemberSchema, appNotEnabledForTenantError, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, embedTokenMintRequestSchema, embedTokenMintResponseSchema, embedTokenVerifyInvalidSchema, embedTokenVerifyRequestSchema, embedTokenVerifyResponseSchema, embedTokenVerifyValidSchema, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, isMembersExceedTargetError, isRosterErrorCode, loginQuantityNeededSchema, loginlessAgentCreateRequestSchema, loginlessAgentCreateResponseSchema, loginlessAgentRemoveRequestSchema, loginlessAgentRemoveResponseSchema, membersExceedQuantityErrorSchema, membersExceedTargetErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planGrantsReadErrorSchema, planGrantsReadResponseSchema, planSwitchAppliedResponseSchema, planSwitchErrorSchema, planSwitchOpenResponseSchema, planSwitchOperationResponseSchema, planSwitchOtherErrorSchema, planSwitchPreviewLineSchema, planSwitchPreviewQuerySchema, planSwitchPreviewResponseSchema, planSwitchPreviewSubscriptionSchema, planSwitchRequestSchema, planSwitchResponseSchema, planSwitchStepSchema, planTrialStartErrorSchema, planTrialStartRequestSchema, planTrialStartResponseSchema, planTrialStateSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, rosterErrorSchema, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, signatureQuantityNeededSchema, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, switchInProgressErrorSchema, teamLoginRosterMemberSchema, teamLoginRosterQuerySchema, teamLoginRosterResponseSchema, teamMemberCreateRequestSchema, teamMemberCreateResponseSchema, teamMemberRemoveRequestSchema, teamMemberRemoveResponseSchema, teamMemberSignInLinkRequestSchema, teamMemberSignInLinkResponseSchema, tenantAppAccessResponseSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema, v1AddOnReadSchema, v1AddOnTenantSubscriptionSchema, v1AddOnsReadResponseSchema, v1TenantMatchErrorSchema };
+export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, ADD_ONS_READ_ERROR_CODES, ADD_ON_CHARGE_ONCE_ERROR_CODES, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS, ADD_ON_CHARGE_ONCE_MANUAL_REASONS, ADD_ON_START_ERROR_CODES, ADD_ON_START_IDEMPOTENCY_HEADER, type AddOnChargeOnceAnswer, type AddOnChargeOnceCharged, type AddOnChargeOnceDeclined, type AddOnChargeOnceError, type AddOnChargeOnceErrorCode, type AddOnChargeOnceManual, type AddOnChargeOnceManualReason, type AddOnChargeOnceQuery, type AddOnChargeOnceRequest, type AddOnChargeOnceUnknown, type AddOnOneTimePrice, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddOnStartError, type AddOnStartErrorCode, type AddOnStartRequest, type AddOnStartResponse, type AddOnUnitPrice, type AddOnsReadError, type AddOnsReadErrorCode, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, EMBED_SESSION_EXPIRED_MESSAGE, EMBED_SURFACES, EMBED_SURFACE_SCOPE, EMBED_TOKEN_AUDIENCE, EMBED_TOKEN_ERRORS, EMBED_TOKEN_ERROR_STATUS, EMBED_TOKEN_INVALID_REASONS, EMBED_TOKEN_MESSAGE, EMBED_TOKEN_PREFIX, EMBED_TOKEN_REFRESH_MESSAGE, EMBED_TOKEN_SCOPES, type EffectiveSettings, type EmbedSurface, type EmbedTokenErrorCode, type EmbedTokenInvalidReason, type EmbedTokenMintRequest, type EmbedTokenMintResponse, type EmbedTokenScope, type EmbedTokenVerifyInvalid, type EmbedTokenVerifyRequest, type EmbedTokenVerifyResponse, type EmbedTokenVerifyValid, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MembersExceedTargetError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_CLASSES, PLAN_GRANTS_READ_ERROR_CODES, PLAN_SWITCH_DEDICATED_ERROR_CODES, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PLAN_SWITCH_KEEP_ADDONS, PLAN_TRIAL_START_ERROR_CODES, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanClass, type PlanGrantsReadError, type PlanGrantsReadErrorCode, type PlanGrantsReadResponse, PlanSwitchApiError, type PlanSwitchAppliedResponse, type PlanSwitchApps, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchKeepAddOn, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchOtherError, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlanTrialStartError, type PlanTrialStartErrorCode, type PlanTrialStartRequest, type PlanTrialStartResponse, type PlanTrialState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type RosterErrorParsed, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type SwitchInProgressError, TENANT_ADD_ON_STATUSES, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantAppAccessResponse, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type V1AddOnRead, type V1AddOnTenantSubscription, type V1AddOnsReadResponse, type V1TenantMatchError, V1_TENANT_MATCH_ERRORS, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnChargeOnceAnswerSchema, addOnChargeOnceChargedSchema, addOnChargeOnceDeclinedSchema, addOnChargeOnceErrorSchema, addOnChargeOnceManualSchema, addOnChargeOnceQuerySchema, addOnChargeOnceRequestIdSchema, addOnChargeOnceRequestSchema, addOnChargeOnceUnknownSchema, addOnOneTimePriceSchema, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, addOnStartErrorSchema, addOnStartRequestSchema, addOnStartResponseSchema, addOnUnitPriceSchema, addOnsReadErrorSchema, agentProvisionPayloadSchema, alreadyMemberSchema, appNotEnabledForTenantError, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, embedTokenMintRequestSchema, embedTokenMintResponseSchema, embedTokenVerifyInvalidSchema, embedTokenVerifyRequestSchema, embedTokenVerifyResponseSchema, embedTokenVerifyValidSchema, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, isMembersExceedTargetError, isPlanClass, isRosterErrorCode, loginQuantityNeededSchema, loginlessAgentCreateRequestSchema, loginlessAgentCreateResponseSchema, loginlessAgentRemoveRequestSchema, loginlessAgentRemoveResponseSchema, membersExceedQuantityErrorSchema, membersExceedTargetErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planGrantsReadErrorSchema, planGrantsReadResponseSchema, planSwitchAppliedResponseSchema, planSwitchErrorSchema, planSwitchOpenResponseSchema, planSwitchOperationResponseSchema, planSwitchOtherErrorSchema, planSwitchPreviewLineSchema, planSwitchPreviewQuerySchema, planSwitchPreviewResponseSchema, planSwitchPreviewSubscriptionSchema, planSwitchRequestSchema, planSwitchResponseSchema, planSwitchStepSchema, planTrialStartErrorSchema, planTrialStartRequestSchema, planTrialStartResponseSchema, planTrialStateSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, rosterErrorSchema, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, signatureQuantityNeededSchema, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, switchInProgressErrorSchema, teamLoginRosterMemberSchema, teamLoginRosterQuerySchema, teamLoginRosterResponseSchema, teamMemberCreateRequestSchema, teamMemberCreateResponseSchema, teamMemberRemoveRequestSchema, teamMemberRemoveResponseSchema, teamMemberSignInLinkRequestSchema, teamMemberSignInLinkResponseSchema, tenantAppAccessResponseSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema, v1AddOnReadSchema, v1AddOnTenantSubscriptionSchema, v1AddOnsReadResponseSchema, v1TenantMatchErrorSchema };
