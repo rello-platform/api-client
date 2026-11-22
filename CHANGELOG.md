@@ -6,6 +6,23 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.46.2 — 2026-11-22
+
+### Fixed — the backstop cap counts ids a flush is carrying (GD-2825, PLATFORM AUDIT 131 prompt 1623; Platform KA prompt 1625)
+
+- v2.46.1 took the flushed ids out of the pending map before the request
+  settled, and the add site judged "existing id" and "room under the cap" from
+  that map alone. During a flush, an in-flight id's next use could be refused
+  at a full map, and new ids took its slot (10,500 distinct ids pending after
+  a 503).
+- The ids of the in-flight snapshot are now held in a set until the flush
+  settles: cleared on 2xx, and after the put-back on failure. An id that is
+  pending OR in flight always counts. A new id is admitted only while fewer
+  than `USAGE_MAX_PENDING_KEYS` distinct ids are unacknowledged (pending ∪ in
+  flight), so that bound holds at every moment, including after a failed
+  flush's put-back.
+- Everything else from v2.46.1 is unchanged.
+
 ## v2.46.1 — 2026-11-22
 
 ### Fixed — a registry refresh no longer deletes pending usage (GD-2803, PLATFORM AUDIT 131; Platform KA prompt 1620)
