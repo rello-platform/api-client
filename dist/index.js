@@ -885,10 +885,17 @@ var PLAN_SWITCH_INTERVALS = ["month", "year"];
 var intervalField = z.enum(PLAN_SWITCH_INTERVALS);
 var PLAN_SWITCH_KEEP_ADDONS = ["refi-radar"];
 var keepAddOnField = z.enum(PLAN_SWITCH_KEEP_ADDONS);
+var PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH = 200;
+var promotionCodeField = z.preprocess(
+  (raw) => typeof raw === "string" ? raw.trim().length === 0 ? void 0 : raw.trim() : raw,
+  z.string().min(1).max(PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH).optional()
+);
 var planSwitchPreviewQuerySchema = z.object({
   targetPlanSlug: z.string().trim().min(1),
   interval: intervalField.optional(),
-  keepAddOns: keepAddOnField.optional()
+  keepAddOns: keepAddOnField.optional(),
+  /** v2.48.0: the discount code to quote with. The POST must send the same code with this preview's id. */
+  promotionCode: promotionCodeField
 }).strict();
 var planSwitchRequestSchema = z.object({
   targetPlanSlug: z.string().min(1),
@@ -898,7 +905,9 @@ var planSwitchRequestSchema = z.object({
   previewId: z.string().min(1).optional(),
   confirmedChargeChange: z.unknown().optional(),
   /** v2.42.0 (K1): keep Refi Radar through a Pro/Team -> Starter/Rates switch. Absent = drop. */
-  keepAddOns: z.array(keepAddOnField).max(1).optional()
+  keepAddOns: z.array(keepAddOnField).max(1).optional(),
+  /** v2.48.0: the code the preview named by `previewId` was quoted with. Needs `previewId`. */
+  promotionCode: promotionCodeField
 }).strict();
 var PLAN_SWITCH_ERROR_CODES = [
   "invalid_body",
@@ -920,9 +929,17 @@ var PLAN_SWITCH_ERROR_CODES = [
   "use_plan_switch",
   "operation_not_found",
   "addon_not_offered",
-  "no_plan_subscription"
+  "no_plan_subscription",
+  "code_not_found",
+  "code_expired",
+  "code_inactive",
+  "code_used_up",
+  "code_not_for_plan",
+  "code_not_for_account",
+  "code_not_applicable",
+  "promotion_code_requires_preview"
 ];
-var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"];
+var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired", "promotion_code_changed"];
 var previewStaleErrorSchema = z.object({
   error: z.literal("preview_stale"),
   reason: z.string().optional()
@@ -964,7 +981,20 @@ var planSwitchPreviewResponseSchema = z.object({
   /** v2.45.0: optional; absent stays absent. */
   apps: z.object({ kept: z.array(z.string().min(1)), added: z.array(z.string().min(1)), dropped: z.array(z.string().min(1)) }).optional(),
   /** v2.45.0: optional; absent stays absent. */
-  amountDueNow: minorAmount.optional()
+  amountDueNow: minorAmount.optional(),
+  /** v2.48.0: optional; absent = no code was asked (or an older Rello). */
+  promotion: z.object({
+    code: z.string().min(1),
+    discountAmount: minorAmount,
+    coupon: z.object({
+      name: z.string().nullable(),
+      percentOff: z.number().nullable(),
+      amountOff: minorAmount.nullable(),
+      currency: z.string().nullable(),
+      duration: z.enum(["once", "repeating", "forever"]),
+      durationInMonths: z.number().int().nullable()
+    })
+  }).optional()
 });
 var planSwitchStepSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -1253,9 +1283,9 @@ var BillingResource = class {
     if (!query.success) {
       throw new RelloValidationError(path, null, { error: "invalid_request", issues: query.error.issues });
     }
-    const { targetPlanSlug, interval, keepAddOns } = query.data;
+    const { targetPlanSlug, interval, keepAddOns, promotionCode } = query.data;
     const raw = await planSwitchCall(
-      () => this.transport.get(path, tenantId, { targetPlanSlug, interval, keepAddOns }, "long")
+      () => this.transport.get(path, tenantId, { targetPlanSlug, interval, keepAddOns, promotionCode }, "long")
     );
     return parsePlanSwitchAnswer(planSwitchPreviewResponseSchema, raw, path);
   }
@@ -3244,6 +3274,7 @@ export {
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PLAN_SWITCH_KEEP_ADDONS,
+  PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH,
   PLAN_TRIAL_START_ERROR_CODES,
   PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS,

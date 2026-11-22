@@ -50,6 +50,7 @@ __export(index_exports, {
   PLAN_SWITCH_ERROR_CODES: () => PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS: () => PLAN_SWITCH_INTERVALS,
   PLAN_SWITCH_KEEP_ADDONS: () => PLAN_SWITCH_KEEP_ADDONS,
+  PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH: () => PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH,
   PLAN_TRIAL_START_ERROR_CODES: () => PLAN_TRIAL_START_ERROR_CODES,
   PREVIEW_STALE_REASONS: () => PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS: () => PROPERTY_AUTOFILL_FIELD_KEYS,
@@ -1081,10 +1082,17 @@ var PLAN_SWITCH_INTERVALS = ["month", "year"];
 var intervalField = import_zod.z.enum(PLAN_SWITCH_INTERVALS);
 var PLAN_SWITCH_KEEP_ADDONS = ["refi-radar"];
 var keepAddOnField = import_zod.z.enum(PLAN_SWITCH_KEEP_ADDONS);
+var PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH = 200;
+var promotionCodeField = import_zod.z.preprocess(
+  (raw) => typeof raw === "string" ? raw.trim().length === 0 ? void 0 : raw.trim() : raw,
+  import_zod.z.string().min(1).max(PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH).optional()
+);
 var planSwitchPreviewQuerySchema = import_zod.z.object({
   targetPlanSlug: import_zod.z.string().trim().min(1),
   interval: intervalField.optional(),
-  keepAddOns: keepAddOnField.optional()
+  keepAddOns: keepAddOnField.optional(),
+  /** v2.48.0: the discount code to quote with. The POST must send the same code with this preview's id. */
+  promotionCode: promotionCodeField
 }).strict();
 var planSwitchRequestSchema = import_zod.z.object({
   targetPlanSlug: import_zod.z.string().min(1),
@@ -1094,7 +1102,9 @@ var planSwitchRequestSchema = import_zod.z.object({
   previewId: import_zod.z.string().min(1).optional(),
   confirmedChargeChange: import_zod.z.unknown().optional(),
   /** v2.42.0 (K1): keep Refi Radar through a Pro/Team -> Starter/Rates switch. Absent = drop. */
-  keepAddOns: import_zod.z.array(keepAddOnField).max(1).optional()
+  keepAddOns: import_zod.z.array(keepAddOnField).max(1).optional(),
+  /** v2.48.0: the code the preview named by `previewId` was quoted with. Needs `previewId`. */
+  promotionCode: promotionCodeField
 }).strict();
 var PLAN_SWITCH_ERROR_CODES = [
   "invalid_body",
@@ -1116,9 +1126,17 @@ var PLAN_SWITCH_ERROR_CODES = [
   "use_plan_switch",
   "operation_not_found",
   "addon_not_offered",
-  "no_plan_subscription"
+  "no_plan_subscription",
+  "code_not_found",
+  "code_expired",
+  "code_inactive",
+  "code_used_up",
+  "code_not_for_plan",
+  "code_not_for_account",
+  "code_not_applicable",
+  "promotion_code_requires_preview"
 ];
-var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"];
+var PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired", "promotion_code_changed"];
 var previewStaleErrorSchema = import_zod.z.object({
   error: import_zod.z.literal("preview_stale"),
   reason: import_zod.z.string().optional()
@@ -1160,7 +1178,20 @@ var planSwitchPreviewResponseSchema = import_zod.z.object({
   /** v2.45.0: optional; absent stays absent. */
   apps: import_zod.z.object({ kept: import_zod.z.array(import_zod.z.string().min(1)), added: import_zod.z.array(import_zod.z.string().min(1)), dropped: import_zod.z.array(import_zod.z.string().min(1)) }).optional(),
   /** v2.45.0: optional; absent stays absent. */
-  amountDueNow: minorAmount.optional()
+  amountDueNow: minorAmount.optional(),
+  /** v2.48.0: optional; absent = no code was asked (or an older Rello). */
+  promotion: import_zod.z.object({
+    code: import_zod.z.string().min(1),
+    discountAmount: minorAmount,
+    coupon: import_zod.z.object({
+      name: import_zod.z.string().nullable(),
+      percentOff: import_zod.z.number().nullable(),
+      amountOff: minorAmount.nullable(),
+      currency: import_zod.z.string().nullable(),
+      duration: import_zod.z.enum(["once", "repeating", "forever"]),
+      durationInMonths: import_zod.z.number().int().nullable()
+    })
+  }).optional()
 });
 var planSwitchStepSchema = import_zod.z.object({
   index: import_zod.z.number().int().nonnegative(),
@@ -1449,9 +1480,9 @@ var BillingResource = class {
     if (!query.success) {
       throw new RelloValidationError(path, null, { error: "invalid_request", issues: query.error.issues });
     }
-    const { targetPlanSlug, interval, keepAddOns } = query.data;
+    const { targetPlanSlug, interval, keepAddOns, promotionCode } = query.data;
     const raw = await planSwitchCall(
-      () => this.transport.get(path, tenantId, { targetPlanSlug, interval, keepAddOns }, "long")
+      () => this.transport.get(path, tenantId, { targetPlanSlug, interval, keepAddOns, promotionCode }, "long")
     );
     return parsePlanSwitchAnswer(planSwitchPreviewResponseSchema, raw, path);
   }
@@ -3441,6 +3472,7 @@ function createServiceClient(config) {
   PLAN_SWITCH_ERROR_CODES,
   PLAN_SWITCH_INTERVALS,
   PLAN_SWITCH_KEEP_ADDONS,
+  PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH,
   PLAN_TRIAL_START_ERROR_CODES,
   PREVIEW_STALE_REASONS,
   PROPERTY_AUTOFILL_FIELD_KEYS,

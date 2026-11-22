@@ -249,6 +249,7 @@ export type {
 export {
   PLAN_SWITCH_INTERVALS,
   PLAN_SWITCH_KEEP_ADDONS,
+  PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH,
   planSwitchPreviewQuerySchema,
   planSwitchRequestSchema,
   PLAN_SWITCH_ERROR_CODES,
@@ -289,6 +290,8 @@ export type {
   PlanSwitchPreviewLine,
   PlanSwitchPreviewSubscription,
   PlanSwitchPreviewResponse,
+  PlanSwitchPreviewPromotion,
+  PlanSwitchPromotionCouponTerms,
   PlanSwitchRequestParsed,
   PlanSwitchRequest,
   PlanSwitchOperationStatus,

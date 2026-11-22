@@ -74,7 +74,7 @@ test("plan-switch error codes: the whole union, incl. confirmation_required, pre
 });
 
 test("preview_stale reasons: inputs_changed, provider_changed, expired (optional on the wire)", () => {
-  assert.deepEqual([...api.PREVIEW_STALE_REASONS].sort(), ["expired", "inputs_changed", "provider_changed"]);
+  assert.deepEqual([...api.PREVIEW_STALE_REASONS].sort(), ["expired", "inputs_changed", "promotion_code_changed", "provider_changed"]); // v2.48.0 adds promotion_code_changed
   const s = api.previewStaleErrorSchema;
   assert.ok(s, "previewStaleErrorSchema missing");
   assert.equal(s.safeParse({ error: "preview_stale" }).success, true, "absent reason = the round-2 meaning");

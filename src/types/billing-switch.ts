@@ -29,6 +29,18 @@ export type PlanSwitchKeepAddOn = (typeof PLAN_SWITCH_KEEP_ADDONS)[number];
 
 const keepAddOnField = z.enum(PLAN_SWITCH_KEEP_ADDONS);
 
+/**
+ * v2.48.0 (D65 step 3, Platform KA prompt 1694): the optional launch discount code on the preview and the POST. A
+ * human-typed code (never a Stripe id), at most {@link PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH} characters, trimmed;
+ * empty or blank is the same as absent (today's behaviour, byte for byte). Rello asks Stripe about it; PFP never
+ * computes a discounted price.
+ */
+export const PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH = 200;
+const promotionCodeField = z.preprocess(
+  (raw: unknown) => (typeof raw === "string" ? (raw.trim().length === 0 ? undefined : raw.trim()) : raw),
+  z.string().min(1).max(PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH).optional(),
+);
+
 // ─── Preview ────────────────────────────────────────────────────────────────
 
 /**
@@ -41,6 +53,8 @@ export const planSwitchPreviewQuerySchema = z
     targetPlanSlug: z.string().trim().min(1),
     interval: intervalField.optional(),
     keepAddOns: keepAddOnField.optional(),
+    /** v2.48.0: the discount code to quote with. The POST must send the same code with this preview's id. */
+    promotionCode: promotionCodeField,
   })
   .strict();
 export type PlanSwitchPreviewQuery = z.infer<typeof planSwitchPreviewQuerySchema>;
@@ -87,6 +101,32 @@ export interface PlanSwitchPreviewResponse {
   apps?: PlanSwitchApps;
   /** v2.45.0: what is charged now, in the currency's minor unit (the sum of `subscriptions[].total`; negative = a credit). Absent = an older Rello. */
   amountDueNow?: number;
+  /**
+   * v2.48.0 (D65 step 3): present only when the preview was asked with a `promotionCode` Stripe accepted.
+   * `subscriptions[].total` and `amountDueNow` are already Stripe's discounted totals.
+   */
+  promotion?: PlanSwitchPreviewPromotion;
+}
+
+/** v2.48.0: a coupon's terms, exactly as Stripe states them (for the screen to say, e.g., "$5 off for 3 months"). */
+export interface PlanSwitchPromotionCouponTerms {
+  name: string | null;
+  /** e.g. 20 for 20%; null for an amount-off coupon. */
+  percentOff: number | null;
+  /** Minor units; null for a percent-off coupon. */
+  amountOff: number | null;
+  currency: string | null;
+  duration: "once" | "repeating" | "forever";
+  durationInMonths: number | null;
+}
+
+/** v2.48.0: the preview's discount code, as Stripe resolved and priced it. */
+export interface PlanSwitchPreviewPromotion {
+  /** Stripe's spelling of the code. */
+  code: string;
+  /** What Stripe's preview says the code takes off the amount due now, in the currency's minor unit. */
+  discountAmount: number;
+  coupon: PlanSwitchPromotionCouponTerms;
 }
 
 /** v2.45.0: a plan switch's effect on the tenant's apps, by app slug (Rello's D1 rule, from local rows). */
@@ -117,6 +157,8 @@ export const planSwitchRequestSchema = z
     confirmedChargeChange: z.unknown().optional(),
     /** v2.42.0 (K1): keep Refi Radar through a Pro/Team -> Starter/Rates switch. Absent = drop. */
     keepAddOns: z.array(keepAddOnField).max(1).optional(),
+    /** v2.48.0: the code the preview named by `previewId` was quoted with. Needs `previewId`. */
+    promotionCode: promotionCodeField,
   })
   .strict();
 export type PlanSwitchRequestParsed = z.infer<typeof planSwitchRequestSchema>;
@@ -130,6 +172,8 @@ export interface PlanSwitchRequest {
   confirmedChargeChange?: true;
   /** v2.42.0 (K1): at most one entry, today `["refi-radar"]`. Absent = drop. */
   keepAddOns?: PlanSwitchKeepAddOn[];
+  /** v2.48.0 (D65 step 3): the code the preview was asked with; send it with that preview's `previewId`. */
+  promotionCode?: string;
 }
 
 export type PlanSwitchOperationStatus = "OPEN" | "APPLIED" | "FAILED" | "COMPENSATED";
@@ -197,6 +241,14 @@ export interface PlanSwitchOperationResponse {
  *      field for a gateway tenant)
  *  503 provider_unreadable (outcome unknown: poll the GET) · not_armed (the open rolled back:
  *      retry with the same idempotencyKey)
+ *
+ * v2.48.0 (D65 step 3), each a refusal of the discount CODE only — the same switch without a code is unaffected:
+ *  400 code_not_found · code_expired · code_inactive · code_used_up · code_not_for_plan (the coupon is restricted
+ *      to other products) · code_not_for_account (another customer's code) · code_not_applicable (Stripe refused it
+ *      on this change, e.g. first purchase only; its words are in `message`) · promotion_code_requires_preview (a
+ *      POST code with no previewId)
+ *  409 preview_stale reason `promotion_code_changed`: the POST's code is not the code the preview was quoted with
+ *  503 provider_unreadable: Stripe could not be read to check the code (never reported as code_not_found)
  */
 export const PLAN_SWITCH_ERROR_CODES = [
   "invalid_body",
@@ -219,6 +271,14 @@ export const PLAN_SWITCH_ERROR_CODES = [
   "operation_not_found",
   "addon_not_offered",
   "no_plan_subscription",
+  "code_not_found",
+  "code_expired",
+  "code_inactive",
+  "code_used_up",
+  "code_not_for_plan",
+  "code_not_for_account",
+  "code_not_applicable",
+  "promotion_code_requires_preview",
 ] as const;
 export type PlanSwitchErrorCode = (typeof PLAN_SWITCH_ERROR_CODES)[number];
 
@@ -230,9 +290,11 @@ export type PlanSwitchErrorCode = (typeof PLAN_SWITCH_ERROR_CODES)[number];
  *  - provider_changed: Stripe's plan price, period end, an add-on item, or the
  *    add-on subscription's trial state differs from what the preview read. The shared reader's two reads, each ≤ 1 bounded retry; 0 mutations.
  *  - expired: past `expiresAt`.
+ *  - promotion_code_changed (v2.48.0): the POST's `promotionCode` is not the code this preview was quoted with
+ *    (a different one, none against a coded preview, or one against an uncoded preview).
  * What PFP does for any of them: fetch a fresh preview and confirm again.
  */
-export const PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired"] as const;
+export const PREVIEW_STALE_REASONS = ["inputs_changed", "provider_changed", "expired", "promotion_code_changed"] as const;
 export type PreviewStaleReason = (typeof PREVIEW_STALE_REASONS)[number];
 
 /**
@@ -317,6 +379,21 @@ export const planSwitchPreviewResponseSchema = z.object({
     .optional(),
   /** v2.45.0: optional; absent stays absent. */
   amountDueNow: minorAmount.optional(),
+  /** v2.48.0: optional; absent = no code was asked (or an older Rello). */
+  promotion: z
+    .object({
+      code: z.string().min(1),
+      discountAmount: minorAmount,
+      coupon: z.object({
+        name: z.string().nullable(),
+        percentOff: z.number().nullable(),
+        amountOff: minorAmount.nullable(),
+        currency: z.string().nullable(),
+        duration: z.enum(["once", "repeating", "forever"]),
+        durationInMonths: z.number().int().nullable(),
+      }),
+    })
+    .optional(),
 }) satisfies z.ZodType<PlanSwitchPreviewResponse>;
 
 export const planSwitchStepSchema = z.object({

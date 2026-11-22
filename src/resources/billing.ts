@@ -163,10 +163,10 @@ export class BillingResource {
     if (!query.success) {
       throw new RelloValidationError(path, null, { error: "invalid_request", issues: query.error.issues });
     }
-    const { targetPlanSlug, interval, keepAddOns } = query.data;
-    // "long": the preview reads Stripe (one createPreview per subscription that changes).
+    const { targetPlanSlug, interval, keepAddOns, promotionCode } = query.data;
+    // "long": the preview reads Stripe (one createPreview per subscription that changes; a code adds its lookup).
     const raw = await planSwitchCall(() =>
-      this.transport.get<unknown>(path, tenantId, { targetPlanSlug, interval, keepAddOns }, "long")
+      this.transport.get<unknown>(path, tenantId, { targetPlanSlug, interval, keepAddOns, promotionCode }, "long")
     );
     return parsePlanSwitchAnswer(planSwitchPreviewResponseSchema, raw, path);
   }

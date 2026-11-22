@@ -78,7 +78,9 @@ test("exports: the three methods, PlanSwitchApiError, PLAN_CLASSES/isPlanClass; 
   const c = createRelloClient({ baseUrl: "https://test.invalid", apiKey: "k", appSlug: "open-house-hub" });
   for (const m of ["previewPlanSwitch", "switchPlan", "getPlanSwitch"]) assert.equal(typeof c.billing[m], "function", `billing.${m}`);
   const before = ["invalid_body", "idempotency_key_reused", "switch_not_allowed", "contact_sales", "members_exceed_target", "addon_price_not_configured", "billing_mode_classic", "already_on_plan", "confirmation_required", "preview_stale", "preview_consumed", "stale_switch", "switch_in_progress", "payment_failed", "provider_unreadable", "not_armed", "use_plan_switch", "operation_not_found", "addon_not_offered"];
-  assert.deepEqual([...api.PLAN_SWITCH_ERROR_CODES], [...before, "no_plan_subscription"]);
+  // v2.48.0 (D65 step 3) appends the discount-code refusals after it; nothing before moves.
+  const codes = ["code_not_found", "code_expired", "code_inactive", "code_used_up", "code_not_for_plan", "code_not_for_account", "code_not_applicable", "promotion_code_requires_preview"];
+  assert.deepEqual([...api.PLAN_SWITCH_ERROR_CODES], [...before, "no_plan_subscription", ...codes]);
   assert.deepEqual([...api.PLAN_CLASSES], ["rello", "app"]);
   assert.equal(api.isPlanClass("rello"), true);
   assert.equal(api.isPlanClass("app"), true);
