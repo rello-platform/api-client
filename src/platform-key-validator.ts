@@ -61,10 +61,13 @@ export interface PlatformKeyValidatorConfig {
  *   retargeted after it was used still has those uses reported (since 2.46.1,
  *   GD-2803).
  * - Backstop bound: at most `USAGE_MAX_PENDING_KEYS` (10,000) distinct key ids
- *   pending. A NEW id arriving at the cap is not added (the check itself still
+ *   unacknowledged — pending, or carried by the flush in flight (since 2.46.2,
+ *   GD-2825) — at every moment, including after a failed flush's put-back.
+ *   A NEW id arriving at the cap is not added (the check itself still
  *   succeeds); the use is counted as not recorded, named in one
  *   `console.warn` per flush, and returned as `UsageFlushResult.notRecorded`.
- *   Ids already pending keep counting past the cap, and a failed flush's
+ *   Ids already unacknowledged (including ones a flush is carrying) keep
+ *   counting past the cap, and a failed flush's
  *   put-back is never dropped. Ids enter only through a successful check
  *   against the registry, so in practice the cap is never reached; it exists
  *   so the map cannot grow without limit while Rello refuses every flush.
@@ -317,6 +320,12 @@ export function createPlatformKeyValidator(
   // Uses not recorded because their id was new at USAGE_MAX_PENDING_KEYS;
   // named (one warn) and reset by the next flush.
   let notRecordedSinceFlush = 0;
+  // Ids carried by the flush in flight (taken out of pendingUsage, not yet
+  // acknowledged). Together with pendingUsage this is the ONE definition of
+  // "unacknowledged": an id in either counts as existing at the add site and
+  // toward USAGE_MAX_PENDING_KEYS. Cleared on 2xx, and after the put-back on
+  // failure (GD-2825). Only one flush runs at a time (flushInProgress).
+  const inFlightIds = new Set<string>();
   // Time of the last flush ATTEMPT (started by a check). Starts at creation,
   // so the first flush comes one window after the validator is built.
   let lastFlushAttemptAt = Date.now();
@@ -488,9 +497,13 @@ export function createPlatformKeyValidator(
       if (count > sent) pendingUsage.set(keyId, count - sent);
       else pendingUsage.delete(keyId);
     }
+    for (const e of entries) inFlightIds.add(e.keyId);
     const total = entries.reduce((sum, e) => sum + e.count, 0);
+    // Put the counts back BEFORE releasing the in-flight reservation, so an
+    // id is never invisible to the add site.
     const putBack = () => {
       for (const e of entries) pendingUsage.set(e.keyId, (pendingUsage.get(e.keyId) ?? 0) + e.count);
+      inFlightIds.clear();
     };
     try {
       const res = await fetch(`${baseUrl}/api/v1/platform/service-keys/touch-batch`, {
@@ -509,6 +522,7 @@ export function createPlatformKeyValidator(
         );
         return { outcome: "failed", entries: entries.length, total, httpStatus: res.status, notRecorded };
       }
+      inFlightIds.clear();
       return { outcome: "sent", entries: entries.length, total, httpStatus: res.status, notRecorded };
     } catch (error) {
       putBack();
@@ -518,6 +532,14 @@ export function createPlatformKeyValidator(
       );
       return { outcome: "failed", entries: entries.length, total, httpStatus: null, notRecorded };
     }
+  }
+
+  /** |pendingUsage ∪ inFlightIds|. Iterates at most 500 in-flight ids, and only near the cap. */
+  function distinctUnacknowledged(): number {
+    if (pendingUsage.size + inFlightIds.size < USAGE_MAX_PENDING_KEYS) return pendingUsage.size + inFlightIds.size;
+    let n = pendingUsage.size;
+    for (const keyId of inFlightIds) if (!pendingUsage.has(keyId)) n += 1;
+    return n;
   }
 
   function flushUsage(): Promise<UsageFlushResult> {
@@ -618,11 +640,12 @@ export function createPlatformKeyValidator(
 
     if (batched) {
       // Batched: count it, make no request; a due flush rides this check.
-      // An id already pending always counts; a NEW id is refused only at the
-      // USAGE_MAX_PENDING_KEYS backstop (the check itself still succeeds).
+      // An unacknowledged id (pending, or carried by the flush in flight)
+      // always counts; a NEW id is refused only when USAGE_MAX_PENDING_KEYS
+      // distinct ids are unacknowledged (the check itself still succeeds).
       const held = pendingUsage.get(match.id);
-      if (held !== undefined) pendingUsage.set(match.id, held + 1);
-      else if (pendingUsage.size < USAGE_MAX_PENDING_KEYS) pendingUsage.set(match.id, 1);
+      if (held !== undefined || inFlightIds.has(match.id)) pendingUsage.set(match.id, (held ?? 0) + 1);
+      else if (distinctUnacknowledged() < USAGE_MAX_PENDING_KEYS) pendingUsage.set(match.id, 1);
       else notRecordedSinceFlush += 1;
       maybeStartFlush(options?.defer ?? configDefer);
       return caller;

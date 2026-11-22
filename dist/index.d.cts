@@ -2711,10 +2711,13 @@ interface PlatformKeyValidatorConfig {
  *   retargeted after it was used still has those uses reported (since 2.46.1,
  *   GD-2803).
  * - Backstop bound: at most `USAGE_MAX_PENDING_KEYS` (10,000) distinct key ids
- *   pending. A NEW id arriving at the cap is not added (the check itself still
+ *   unacknowledged — pending, or carried by the flush in flight (since 2.46.2,
+ *   GD-2825) — at every moment, including after a failed flush's put-back.
+ *   A NEW id arriving at the cap is not added (the check itself still
  *   succeeds); the use is counted as not recorded, named in one
  *   `console.warn` per flush, and returned as `UsageFlushResult.notRecorded`.
- *   Ids already pending keep counting past the cap, and a failed flush's
+ *   Ids already unacknowledged (including ones a flush is carrying) keep
+ *   counting past the cap, and a failed flush's
  *   put-back is never dropped. Ids enter only through a successful check
  *   against the registry, so in practice the cap is never reached; it exists
  *   so the map cannot grow without limit while Rello refuses every flush.

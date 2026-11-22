@@ -2042,6 +2042,7 @@ function createPlatformKeyValidator(config) {
   const configDefer = config.usage?.defer;
   const pendingUsage = /* @__PURE__ */ new Map();
   let notRecordedSinceFlush = 0;
+  const inFlightIds = /* @__PURE__ */ new Set();
   let lastFlushAttemptAt = Date.now();
   let flushInProgress = null;
   let keyCache = [];
@@ -2156,9 +2157,11 @@ function createPlatformKeyValidator(config) {
       if (count > sent) pendingUsage.set(keyId, count - sent);
       else pendingUsage.delete(keyId);
     }
+    for (const e of entries) inFlightIds.add(e.keyId);
     const total = entries.reduce((sum, e) => sum + e.count, 0);
     const putBack = () => {
       for (const e of entries) pendingUsage.set(e.keyId, (pendingUsage.get(e.keyId) ?? 0) + e.count);
+      inFlightIds.clear();
     };
     try {
       const res = await fetch(`${baseUrl}/api/v1/platform/service-keys/touch-batch`, {
@@ -2177,6 +2180,7 @@ function createPlatformKeyValidator(config) {
         );
         return { outcome: "failed", entries: entries.length, total, httpStatus: res.status, notRecorded };
       }
+      inFlightIds.clear();
       return { outcome: "sent", entries: entries.length, total, httpStatus: res.status, notRecorded };
     } catch (error) {
       putBack();
@@ -2186,6 +2190,12 @@ function createPlatformKeyValidator(config) {
       );
       return { outcome: "failed", entries: entries.length, total, httpStatus: null, notRecorded };
     }
+  }
+  function distinctUnacknowledged() {
+    if (pendingUsage.size + inFlightIds.size < USAGE_MAX_PENDING_KEYS) return pendingUsage.size + inFlightIds.size;
+    let n = pendingUsage.size;
+    for (const keyId of inFlightIds) if (!pendingUsage.has(keyId)) n += 1;
+    return n;
   }
   function flushUsage() {
     if (!batched) {
@@ -2255,8 +2265,8 @@ function createPlatformKeyValidator(config) {
     };
     if (batched) {
       const held = pendingUsage.get(match.id);
-      if (held !== void 0) pendingUsage.set(match.id, held + 1);
-      else if (pendingUsage.size < USAGE_MAX_PENDING_KEYS) pendingUsage.set(match.id, 1);
+      if (held !== void 0 || inFlightIds.has(match.id)) pendingUsage.set(match.id, (held ?? 0) + 1);
+      else if (distinctUnacknowledged() < USAGE_MAX_PENDING_KEYS) pendingUsage.set(match.id, 1);
       else notRecordedSinceFlush += 1;
       maybeStartFlush(options?.defer ?? configDefer);
       return caller;
