@@ -6,6 +6,26 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.46.1 — 2026-11-22
+
+### Fixed — a registry refresh no longer deletes pending usage (GD-2803, PLATFORM AUDIT 131; Platform KA prompt 1620)
+
+- v2.46.0's registry refresh dropped every pending count whose key id was no
+  longer listed. A key revoked, expired or retargeted after it was used still
+  had those successful uses, and after a failed or overlapping flush they were
+  gone for good. A refresh now never reads or changes the pending map: the
+  registry decides whether a NEW check succeeds, never whether past uses are
+  reported. Counts leave the map only in a flush Rello acknowledged (2xx); a
+  failure puts them back, as before.
+- Backstop: `USAGE_MAX_PENDING_KEYS` (exported, 10,000) distinct pending key
+  ids. A NEW id arriving at the cap is not added (the check itself still
+  succeeds). Those uses are named in one `console.warn` per flush and returned
+  as the new `UsageFlushResult.notRecorded`. Ids already pending keep counting
+  past the cap, and a put-back is never dropped. Ids enter only through a
+  successful check, so in practice the cap is never reached; it bounds the map
+  while Rello refuses every flush.
+- Per-request mode is unchanged.
+
 ## v2.46.0 — 2026-11-22
 
 ### Added — batched key-usage reporting and the caller's tenant (tracking S2b part 1, Platform KA prompt 1613)

@@ -62,6 +62,7 @@ export {
   type ValidatorNullReport,
   callerTenantScope,
   isInAnchorWindow,
+  USAGE_MAX_PENDING_KEYS,
   type CachedKey,
   type CallerTenantScope,
   type PlatformKeyUsageConfig,

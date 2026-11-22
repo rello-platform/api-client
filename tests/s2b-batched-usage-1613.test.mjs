@@ -311,7 +311,10 @@ test("per-request mode keeps the unaligned refresh (TTL only)", async () => {
   assert.equal(count(calls, "registry"), 2);
 });
 
-test("the usage map is bounded by the registry: a key dropped from it loses its pending counts", async () => {
+// Inverted in 2.46.1 (GD-2803, PLATFORM AUDIT 131): v2.46.0 asserted that a
+// refresh drops a removed key's pending counts. That lost real successful
+// uses. A removed key now fails NEW checks but its past uses are still sent.
+test("a key dropped from the registry keeps its pending counts; only new checks fail (GD-2803)", async () => {
   setClock(10, 6);
   const warnings = [];
   console.warn = (...a) => warnings.push(a.join(" "));
@@ -326,9 +329,10 @@ test("the usage map is bounded by the registry: a key dropped from it loses its 
   assert.equal(await v(req(KEYS[2].token)), null, "key c no longer registered");
   const r = await v.flushUsage();
   const body = calls.filter((c) => c.kind === "touch-batch")[0].body;
-  assert.deepEqual(body.entries.map((e) => e.keyId).sort(), [KEYS[0].id, KEYS[1].id].sort());
-  assert.equal(r.total, 3 + 2);
-  assert.ok(warnings.some((w) => w.includes("no longer in the registry") && w.includes("count=2")));
+  assert.deepEqual(body.entries.map((e) => e.keyId).sort(), [KEYS[0].id, KEYS[1].id, KEYS[2].id].sort());
+  assert.equal(body.entries.find((e) => e.keyId === KEYS[2].id).count, 2, "key c's two real uses are reported");
+  assert.equal(r.total, 3 + 2 + 2);
+  assert.ok(!warnings.some((w) => w.includes("no longer in the registry")), "nothing is dropped");
 });
 
 test("one request never exceeds Rello's 500-entry cap; the rest stay pending", async () => {
