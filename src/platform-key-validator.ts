@@ -35,17 +35,112 @@ export interface PlatformKeyValidatorConfig {
    * cache populate — equivalent to v2.10.0 and earlier behavior).
    */
   staleServeMaxMs?: number;
+  /**
+   * How a successful check reports key usage to Rello (since 2.46.0).
+   * Omitted = `{ mode: "per-request" }`, the behaviour of every earlier
+   * version: one `POST /api/v1/platform/service-keys/touch` per successful
+   * check. See `PlatformKeyUsageConfig`.
+   */
+  usage?: PlatformKeyUsageConfig;
+}
+
+/**
+ * Usage reporting (since 2.46.0; plan PLATFORM-TRACKING-SYSTEM §9.1).
+ *
+ * - `"per-request"` (default): unchanged. Every successful check fires one
+ *   `/service-keys/touch`, cache hits included, and Rello writes
+ *   `ApiKey.lastUsedAt` each time.
+ * - `"batched"`: a successful check adds `keyId → count` to an in-memory map
+ *   and makes NO request. `validator.flushUsage()` sends every pending key in
+ *   ONE `POST /api/v1/platform/service-keys/touch-batch`. Nothing pending
+ *   sends nothing. A non-2xx answer or a network failure puts the counts back
+ *   for the next window. The map only ever holds ids of keys in the current
+ *   registry, so it is bounded by the registered key count.
+ *
+ * The flush is driven by requests, never by a timer: the first successful
+ * check at least `windowMs` after the last flush attempt (or after the
+ * validator was created) that falls inside a platform anchor window hands
+ * `flushUsage()` to `defer`. An idle isolate sends nothing. Counts still held
+ * when an isolate dies are lost; they only feed an observability counter.
+ *
+ * In `"batched"` mode the registry refresh honours the same alignment: once
+ * `cacheTtlMs` has passed it refreshes at the next anchor window and serves
+ * the cached keys until then. A validator that has never loaded the registry
+ * still fetches at once.
+ */
+export interface PlatformKeyUsageConfig {
+  mode: "per-request" | "batched";
+  /** Minimum time between flush attempts. Default 900000 (15 min). Batched mode only. */
+  windowMs?: number;
+  /**
+   * Flush, and refresh the registry after its TTL, only inside the platform
+   * anchor windows (UTC minutes :00–04, :15–19, :30–34, :45–49 — the windows
+   * Rello's `auth-buffer-flush` drain runs in), so the shared hub can sleep
+   * between them. Default true. Batched mode only.
+   */
+  alignToAnchorWindows?: boolean;
+  /**
+   * Receives the flush promise so the runtime keeps it alive after the
+   * response returns. On a Cloudflare Worker this must be `ctx.waitUntil`:
+   * a bare promise is cancelled when the response is sent. Because a Worker's
+   * `ctx` belongs to one request, prefer passing it per call —
+   * `validator(request, { defer: (p) => ctx.waitUntil(p) })` — which overrides
+   * this one. Omitted on both: the promise is left to run on its own.
+   */
+  defer?: (p: Promise<unknown>) => void;
+}
+
+/** Outcome of one `flushUsage()` call. Each case keeps its own value. */
+export type UsageFlushOutcome =
+  /** Per-request mode: there is never anything to flush. */
+  | "disabled"
+  /** Nothing was pending; no request was made. */
+  | "empty"
+  /** Rello answered 2xx; the sent counts are gone from the map. */
+  | "sent"
+  /** Non-2xx or no answer; every sent count was put back for the next window. */
+  | "failed";
+
+export interface UsageFlushResult {
+  outcome: UsageFlushOutcome;
+  /** Entries in the request body (0 when no request was made). */
+  entries: number;
+  /** Sum of the counts in the request body. */
+  total: number;
+  /** HTTP status of the answer; null when no request was made or none came back. */
+  httpStatus: number | null;
+}
+
+/** Rello's `touch-batch` limits; a flush never sends more in one request. */
+const TOUCH_BATCH_MAX_ENTRIES = 500;
+const TOUCH_BATCH_MAX_COUNT = 1_000_000;
+
+/**
+ * True inside a platform anchor window: UTC minutes :00–04, :15–19, :30–34,
+ * :45–49 (Rello `src/trigger/auth-buffer-flush.ts`, cadence `2,17,32,47`).
+ */
+export function isInAnchorWindow(epochMs: number): boolean {
+  return new Date(epochMs).getUTCMinutes() % 15 < 5;
 }
 
 /**
  * A cached service key entry fetched from Rello.
  */
-interface CachedKey {
+export interface CachedKey {
   id: string;
   appSource: string;
   keyHash: string;
   // '*' is the platform-wide-key wildcard semantic per CENTRALIZED-API-KEY-MIGRATION Session 2; first-class on the consumed contract.
   permissions: readonly (PermissionSlug | "*")[];
+  /**
+   * `ApiKey.tenantId` as the registry answered it (since 2.46.0).
+   * - a string → the key is scoped to that tenant;
+   * - `null`   → the registry said the key has no tenant (platform scope);
+   * - `undefined` → the answer carried no usable `tenantId` field (an older
+   *   Rello, or a malformed value): scope UNKNOWN. Never read it as platform
+   *   scope (`unknown-is-not-absent`). See `callerTenantScope`.
+   */
+  tenantId: string | null | undefined;
 }
 
 /**
@@ -59,6 +154,43 @@ export interface PlatformCaller {
   /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
   // '*' is the platform-wide-key wildcard semantic per CENTRALIZED-API-KEY-MIGRATION Session 2; first-class on the consumed contract.
   permissions: readonly (PermissionSlug | "*")[];
+  /**
+   * The key's tenant, from the credential only (since 2.46.0): a string =
+   * tenant scope, `null` = platform scope, `undefined` = UNKNOWN (the
+   * registry answer had no `tenantId`). Same meaning as `CachedKey.tenantId`.
+   */
+  tenantId: string | null | undefined;
+}
+
+/** A caller's scope, with unknown kept apart from platform. */
+export type CallerTenantScope =
+  | { kind: "tenant"; tenantId: string }
+  | { kind: "platform" }
+  | { kind: "unknown" };
+
+/**
+ * Reads a caller's scope from its credential. `undefined` is `unknown`,
+ * never `platform`: a missing field must not grant platform scope.
+ */
+export function callerTenantScope(caller: Pick<PlatformCaller, "tenantId">): CallerTenantScope {
+  if (typeof caller.tenantId === "string") return { kind: "tenant", tenantId: caller.tenantId };
+  if (caller.tenantId === null) return { kind: "platform" };
+  return { kind: "unknown" };
+}
+
+/** Per-call options for the validator (since 2.46.0). */
+export interface ValidateCallOptions {
+  /** Overrides `usage.defer` for a flush this call starts (a Worker passes its own request's `ctx.waitUntil`). */
+  defer?: (p: Promise<unknown>) => void;
+}
+
+/** Reads `tenantId` from one registry entry: a non-empty string, null, or undefined (unknown). */
+function readTenantId(entry: Record<string, unknown>): string | null | undefined {
+  if (!Object.prototype.hasOwnProperty.call(entry, "tenantId")) return undefined;
+  const v = entry.tenantId;
+  if (v === null) return null;
+  if (typeof v === "string" && v.length > 0) return v;
+  return undefined;
 }
 
 /**
@@ -93,8 +225,18 @@ export interface ValidatorNullReport {
  * validated). Read-only: it never changes what the call returns. Keyed by the
  * Request object, so concurrent requests never see each other's reason.
  */
-export type PlatformKeyValidator = ((request: Request) => Promise<PlatformCaller | null>) & {
+export type PlatformKeyValidator = ((
+  request: Request,
+  options?: ValidateCallOptions
+) => Promise<PlatformCaller | null>) & {
   reasonFor(request: Request): ValidatorNullReport | undefined;
+  /**
+   * Batched mode: send every pending usage count in one
+   * `/service-keys/touch-batch` request (since 2.46.0). Never rejects. A
+   * call while a flush is in flight returns that flush. Per-request mode:
+   * resolves `{ outcome: "disabled" }` and sends nothing.
+   */
+  flushUsage(): Promise<UsageFlushResult>;
 };
 
 /**
@@ -139,6 +281,18 @@ export function createPlatformKeyValidator(
   const targetApp = config.ownAppSlug.toUpperCase().replace(/-/g, "_");
   const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
   const staleServeMaxMs = config.staleServeMaxMs ?? 30 * 60 * 1000;
+  const batched = config.usage?.mode === "batched";
+  const usageWindowMs = config.usage?.windowMs ?? 15 * 60 * 1000;
+  const alignToAnchor = batched && (config.usage?.alignToAnchorWindows ?? true);
+  const configDefer = config.usage?.defer;
+
+  // Batched usage: keyId → successful checks not yet acknowledged by Rello.
+  // Only ids in the current registry ever enter it (see refreshCache's prune).
+  const pendingUsage = new Map<string, number>();
+  // Time of the last flush ATTEMPT (started by a check). Starts at creation,
+  // so the first flush comes one window after the validator is built.
+  let lastFlushAttemptAt = Date.now();
+  let flushInProgress: Promise<UsageFlushResult> | null = null;
 
   let keyCache: CachedKey[] = [];
   // Time of last refresh ATTEMPT — bumped on every fetch (success or failure).
@@ -217,8 +371,30 @@ export function createPlatformKeyValidator(
           permissions: Array.isArray(entry.permissions)
             ? (entry.permissions.map(String) as (PermissionSlug | "*")[])
             : [],
+          tenantId: readTenantId(entry),
         };
       });
+
+      // Keep the usage map bounded by the registry: a key Rello no longer
+      // lists (revoked, expired, retargeted) can gain no new counts, so its
+      // pending counts are dropped here, and said so.
+      if (pendingUsage.size > 0) {
+        const registered = new Set(keyCache.map((k) => k.id));
+        let droppedKeys = 0;
+        let droppedCount = 0;
+        for (const [keyId, count] of pendingUsage) {
+          if (!registered.has(keyId)) {
+            pendingUsage.delete(keyId);
+            droppedKeys += 1;
+            droppedCount += count;
+          }
+        }
+        if (droppedKeys > 0) {
+          console.warn(
+            `[platform-key-validator] dropped pending usage for ${droppedKeys} key(s) no longer in the registry (count=${droppedCount})`
+          );
+        }
+      }
 
       lastSuccessTime = lastFetchTime;
       lastFetchStatus = "ok";
@@ -250,7 +426,12 @@ export function createPlatformKeyValidator(
    * refresh cadence is preserved at `cacheTtlMs` regardless of upstream state.
    */
   async function ensureFreshCache(): Promise<void> {
-    if (Date.now() - lastFetchTime < cacheTtlMs) return;
+    const now = Date.now();
+    if (now - lastFetchTime < cacheTtlMs) return;
+    // Batched + aligned: past the TTL, a validator that has loaded the
+    // registry waits for the next anchor window and serves its cached keys
+    // until then. One that never loaded it (a cold isolate) fetches at once.
+    if (alignToAnchor && lastSuccessTime !== 0 && !isInAnchorWindow(now)) return;
 
     if (!fetchInProgress) {
       fetchInProgress = refreshCache().finally(() => {
@@ -275,8 +456,90 @@ export function createPlatformKeyValidator(
     return null;
   }
 
+  /**
+   * Send every pending count in one touch-batch request. Takes the counts out
+   * of the map first, so checks that land during the request start fresh
+   * counts; on any failure the taken counts are added back. Never rejects.
+   */
+  async function sendPendingUsage(): Promise<UsageFlushResult> {
+    if (pendingUsage.size === 0) {
+      return { outcome: "empty", entries: 0, total: 0, httpStatus: null };
+    }
+    const entries: { keyId: string; count: number }[] = [];
+    for (const [keyId, count] of pendingUsage) {
+      if (entries.length >= TOUCH_BATCH_MAX_ENTRIES) break;
+      const sent = Math.min(count, TOUCH_BATCH_MAX_COUNT);
+      entries.push({ keyId, count: sent });
+      // Anything over Rello's per-entry cap stays pending for the next window.
+      if (count > sent) pendingUsage.set(keyId, count - sent);
+      else pendingUsage.delete(keyId);
+    }
+    const total = entries.reduce((sum, e) => sum + e.count, 0);
+    const putBack = () => {
+      for (const e of entries) pendingUsage.set(e.keyId, (pendingUsage.get(e.keyId) ?? 0) + e.count);
+    };
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/platform/service-keys/touch-batch`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.relloApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ entries }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) {
+        putBack();
+        console.warn(
+          `[platform-key-validator] usage flush refused: ${res.status} — kept ${entries.length} key(s), count=${total}, for the next window`
+        );
+        return { outcome: "failed", entries: entries.length, total, httpStatus: res.status };
+      }
+      return { outcome: "sent", entries: entries.length, total, httpStatus: res.status };
+    } catch (error) {
+      putBack();
+      console.warn(
+        `[platform-key-validator] usage flush got no answer — kept ${entries.length} key(s), count=${total}, for the next window:`,
+        error instanceof Error ? error.message : "unknown error"
+      );
+      return { outcome: "failed", entries: entries.length, total, httpStatus: null };
+    }
+  }
+
+  function flushUsage(): Promise<UsageFlushResult> {
+    if (!batched) {
+      return Promise.resolve({ outcome: "disabled", entries: 0, total: 0, httpStatus: null });
+    }
+    if (!flushInProgress) {
+      flushInProgress = sendPendingUsage().finally(() => {
+        flushInProgress = null;
+      });
+    }
+    return flushInProgress;
+  }
+
+  /** Called after a successful batched check: start a flush when one is due. */
+  function maybeStartFlush(defer: ((p: Promise<unknown>) => void) | undefined): void {
+    const now = Date.now();
+    if (now - lastFlushAttemptAt < usageWindowMs) return;
+    if (alignToAnchor && !isInAnchorWindow(now)) return;
+    if (flushInProgress) return;
+    lastFlushAttemptAt = now;
+    const p = flushUsage();
+    if (!defer) return; // flushUsage never rejects, so a bare promise is safe
+    try {
+      defer(p);
+    } catch (error) {
+      console.warn(
+        "[platform-key-validator] defer threw; the usage flush runs without it:",
+        error instanceof Error ? error.message : "unknown error"
+      );
+    }
+  }
+
   const validatePlatformCaller = async function validatePlatformCaller(
-    request: Request
+    request: Request,
+    options?: ValidateCallOptions
   ): Promise<PlatformCaller | null> {
     nullReasons.delete(request);
     // Extract Bearer token
@@ -332,9 +595,24 @@ export function createPlatformKeyValidator(
     const match = keyCache.find((k) => k.keyHash === tokenHash);
     if (!match) return refuse(request, "no-key-match", false);
 
-    // Fire-and-forget bump of ApiKey.lastUsedAt on Rello — observational only,
-    // never block auth on the write. Mirrors the legacy validateApiKey()
-    // fire-and-forget pattern at Rello/src/lib/auth/api-key.ts:71-76.
+    const caller: PlatformCaller = {
+      appSource: match.appSource,
+      keyId: match.id,
+      permissions: match.permissions,
+      tenantId: match.tenantId,
+    };
+
+    if (batched) {
+      // Batched: count it, make no request; a due flush rides this check.
+      pendingUsage.set(match.id, (pendingUsage.get(match.id) ?? 0) + 1);
+      maybeStartFlush(options?.defer ?? configDefer);
+      return caller;
+    }
+
+    // Per-request (default, unchanged): fire-and-forget bump of
+    // ApiKey.lastUsedAt on Rello — observational only, never block auth on
+    // the write. Mirrors the legacy validateApiKey() fire-and-forget pattern
+    // at Rello/src/lib/auth/api-key.ts:71-76.
     void (async () => {
       try {
         await fetch(`${baseUrl}/api/v1/platform/service-keys/touch`, {
@@ -354,15 +632,12 @@ export function createPlatformKeyValidator(
       }
     })();
 
-    return {
-      appSource: match.appSource,
-      keyId: match.id,
-      permissions: match.permissions,
-    };
+    return caller;
   };
 
   return Object.assign(validatePlatformCaller, {
     reasonFor: (request: Request): ValidatorNullReport | undefined => nullReasons.get(request),
+    flushUsage,
   });
 }
 

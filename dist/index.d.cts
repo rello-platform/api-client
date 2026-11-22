@@ -2686,6 +2686,100 @@ interface PlatformKeyValidatorConfig {
      * cache populate — equivalent to v2.10.0 and earlier behavior).
      */
     staleServeMaxMs?: number;
+    /**
+     * How a successful check reports key usage to Rello (since 2.46.0).
+     * Omitted = `{ mode: "per-request" }`, the behaviour of every earlier
+     * version: one `POST /api/v1/platform/service-keys/touch` per successful
+     * check. See `PlatformKeyUsageConfig`.
+     */
+    usage?: PlatformKeyUsageConfig;
+}
+/**
+ * Usage reporting (since 2.46.0; plan PLATFORM-TRACKING-SYSTEM §9.1).
+ *
+ * - `"per-request"` (default): unchanged. Every successful check fires one
+ *   `/service-keys/touch`, cache hits included, and Rello writes
+ *   `ApiKey.lastUsedAt` each time.
+ * - `"batched"`: a successful check adds `keyId → count` to an in-memory map
+ *   and makes NO request. `validator.flushUsage()` sends every pending key in
+ *   ONE `POST /api/v1/platform/service-keys/touch-batch`. Nothing pending
+ *   sends nothing. A non-2xx answer or a network failure puts the counts back
+ *   for the next window. The map only ever holds ids of keys in the current
+ *   registry, so it is bounded by the registered key count.
+ *
+ * The flush is driven by requests, never by a timer: the first successful
+ * check at least `windowMs` after the last flush attempt (or after the
+ * validator was created) that falls inside a platform anchor window hands
+ * `flushUsage()` to `defer`. An idle isolate sends nothing. Counts still held
+ * when an isolate dies are lost; they only feed an observability counter.
+ *
+ * In `"batched"` mode the registry refresh honours the same alignment: once
+ * `cacheTtlMs` has passed it refreshes at the next anchor window and serves
+ * the cached keys until then. A validator that has never loaded the registry
+ * still fetches at once.
+ */
+interface PlatformKeyUsageConfig {
+    mode: "per-request" | "batched";
+    /** Minimum time between flush attempts. Default 900000 (15 min). Batched mode only. */
+    windowMs?: number;
+    /**
+     * Flush, and refresh the registry after its TTL, only inside the platform
+     * anchor windows (UTC minutes :00–04, :15–19, :30–34, :45–49 — the windows
+     * Rello's `auth-buffer-flush` drain runs in), so the shared hub can sleep
+     * between them. Default true. Batched mode only.
+     */
+    alignToAnchorWindows?: boolean;
+    /**
+     * Receives the flush promise so the runtime keeps it alive after the
+     * response returns. On a Cloudflare Worker this must be `ctx.waitUntil`:
+     * a bare promise is cancelled when the response is sent. Because a Worker's
+     * `ctx` belongs to one request, prefer passing it per call —
+     * `validator(request, { defer: (p) => ctx.waitUntil(p) })` — which overrides
+     * this one. Omitted on both: the promise is left to run on its own.
+     */
+    defer?: (p: Promise<unknown>) => void;
+}
+/** Outcome of one `flushUsage()` call. Each case keeps its own value. */
+type UsageFlushOutcome = 
+/** Per-request mode: there is never anything to flush. */
+"disabled"
+/** Nothing was pending; no request was made. */
+ | "empty"
+/** Rello answered 2xx; the sent counts are gone from the map. */
+ | "sent"
+/** Non-2xx or no answer; every sent count was put back for the next window. */
+ | "failed";
+interface UsageFlushResult {
+    outcome: UsageFlushOutcome;
+    /** Entries in the request body (0 when no request was made). */
+    entries: number;
+    /** Sum of the counts in the request body. */
+    total: number;
+    /** HTTP status of the answer; null when no request was made or none came back. */
+    httpStatus: number | null;
+}
+/**
+ * True inside a platform anchor window: UTC minutes :00–04, :15–19, :30–34,
+ * :45–49 (Rello `src/trigger/auth-buffer-flush.ts`, cadence `2,17,32,47`).
+ */
+declare function isInAnchorWindow(epochMs: number): boolean;
+/**
+ * A cached service key entry fetched from Rello.
+ */
+interface CachedKey {
+    id: string;
+    appSource: string;
+    keyHash: string;
+    permissions: readonly (PermissionSlug | "*")[];
+    /**
+     * `ApiKey.tenantId` as the registry answered it (since 2.46.0).
+     * - a string → the key is scoped to that tenant;
+     * - `null`   → the registry said the key has no tenant (platform scope);
+     * - `undefined` → the answer carried no usable `tenantId` field (an older
+     *   Rello, or a malformed value): scope UNKNOWN. Never read it as platform
+     *   scope (`unknown-is-not-absent`). See `callerTenantScope`.
+     */
+    tenantId: string | null | undefined;
 }
 /**
  * Result of a successful caller validation.
@@ -2697,6 +2791,31 @@ interface PlatformCaller {
     keyId: string;
     /** Permissions array from the ApiKey record. Canonical slugs from `@rello-platform/permissions`. */
     permissions: readonly (PermissionSlug | "*")[];
+    /**
+     * The key's tenant, from the credential only (since 2.46.0): a string =
+     * tenant scope, `null` = platform scope, `undefined` = UNKNOWN (the
+     * registry answer had no `tenantId`). Same meaning as `CachedKey.tenantId`.
+     */
+    tenantId: string | null | undefined;
+}
+/** A caller's scope, with unknown kept apart from platform. */
+type CallerTenantScope = {
+    kind: "tenant";
+    tenantId: string;
+} | {
+    kind: "platform";
+} | {
+    kind: "unknown";
+};
+/**
+ * Reads a caller's scope from its credential. `undefined` is `unknown`,
+ * never `platform`: a missing field must not grant platform scope.
+ */
+declare function callerTenantScope(caller: Pick<PlatformCaller, "tenantId">): CallerTenantScope;
+/** Per-call options for the validator (since 2.46.0). */
+interface ValidateCallOptions {
+    /** Overrides `usage.defer` for a flush this call starts (a Worker passes its own request's `ctx.waitUntil`). */
+    defer?: (p: Promise<unknown>) => void;
 }
 /**
  * Why a validator call returned null (since 2.28.1).
@@ -2723,8 +2842,15 @@ interface ValidatorNullReport {
  * validated). Read-only: it never changes what the call returns. Keyed by the
  * Request object, so concurrent requests never see each other's reason.
  */
-type PlatformKeyValidator = ((request: Request) => Promise<PlatformCaller | null>) & {
+type PlatformKeyValidator = ((request: Request, options?: ValidateCallOptions) => Promise<PlatformCaller | null>) & {
     reasonFor(request: Request): ValidatorNullReport | undefined;
+    /**
+     * Batched mode: send every pending usage count in one
+     * `/service-keys/touch-batch` request (since 2.46.0). Never rejects. A
+     * call while a flush is in flight returns that flush. Per-request mode:
+     * resolves `{ outcome: "disabled" }` and sends nothing.
+     */
+    flushUsage(): Promise<UsageFlushResult>;
 };
 declare function createPlatformKeyValidator(config: PlatformKeyValidatorConfig): PlatformKeyValidator;
 /**
@@ -4866,4 +4992,4 @@ declare function createRelloClient(config?: RelloClientConfig): RelloClient;
  */
 declare function createServiceClient(config: ServiceClientConfig): ServiceClient;
 
-export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, ADD_ONS_READ_ERROR_CODES, ADD_ON_CHARGE_ONCE_ERROR_CODES, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS, ADD_ON_CHARGE_ONCE_MANUAL_REASONS, ADD_ON_START_ERROR_CODES, ADD_ON_START_IDEMPOTENCY_HEADER, type AddOnChargeOnceAnswer, type AddOnChargeOnceCharged, type AddOnChargeOnceDeclined, type AddOnChargeOnceError, type AddOnChargeOnceErrorCode, type AddOnChargeOnceManual, type AddOnChargeOnceManualReason, type AddOnChargeOnceQuery, type AddOnChargeOnceRequest, type AddOnChargeOnceUnknown, type AddOnOneTimePrice, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddOnStartError, type AddOnStartErrorCode, type AddOnStartRequest, type AddOnStartResponse, type AddOnUnitPrice, type AddOnsReadError, type AddOnsReadErrorCode, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, EMBED_SESSION_EXPIRED_MESSAGE, EMBED_SURFACES, EMBED_SURFACE_SCOPE, EMBED_TOKEN_AUDIENCE, EMBED_TOKEN_ERRORS, EMBED_TOKEN_ERROR_STATUS, EMBED_TOKEN_INVALID_REASONS, EMBED_TOKEN_MESSAGE, EMBED_TOKEN_PREFIX, EMBED_TOKEN_REFRESH_MESSAGE, EMBED_TOKEN_SCOPES, type EffectiveSettings, type EmbedSurface, type EmbedTokenErrorCode, type EmbedTokenInvalidReason, type EmbedTokenMintRequest, type EmbedTokenMintResponse, type EmbedTokenScope, type EmbedTokenVerifyInvalid, type EmbedTokenVerifyRequest, type EmbedTokenVerifyResponse, type EmbedTokenVerifyValid, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MembersExceedTargetError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_CLASSES, PLAN_GRANTS_READ_ERROR_CODES, PLAN_SWITCH_DEDICATED_ERROR_CODES, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PLAN_SWITCH_KEEP_ADDONS, PLAN_TRIAL_START_ERROR_CODES, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanClass, type PlanGrantsReadError, type PlanGrantsReadErrorCode, type PlanGrantsReadResponse, PlanSwitchApiError, type PlanSwitchAppliedResponse, type PlanSwitchApps, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchKeepAddOn, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchOtherError, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlanTrialStartError, type PlanTrialStartErrorCode, type PlanTrialStartRequest, type PlanTrialStartResponse, type PlanTrialState, type PlatformCaller, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type RosterErrorParsed, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type SwitchInProgressError, TENANT_ADD_ON_STATUSES, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantAppAccessResponse, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageInput, type V1AddOnRead, type V1AddOnTenantSubscription, type V1AddOnsReadResponse, type V1TenantMatchError, V1_TENANT_MATCH_ERRORS, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnChargeOnceAnswerSchema, addOnChargeOnceChargedSchema, addOnChargeOnceDeclinedSchema, addOnChargeOnceErrorSchema, addOnChargeOnceManualSchema, addOnChargeOnceQuerySchema, addOnChargeOnceRequestIdSchema, addOnChargeOnceRequestSchema, addOnChargeOnceUnknownSchema, addOnOneTimePriceSchema, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, addOnStartErrorSchema, addOnStartRequestSchema, addOnStartResponseSchema, addOnUnitPriceSchema, addOnsReadErrorSchema, agentProvisionPayloadSchema, alreadyMemberSchema, appNotEnabledForTenantError, businessIndustry, businessType, callerHasPermission, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, embedTokenMintRequestSchema, embedTokenMintResponseSchema, embedTokenVerifyInvalidSchema, embedTokenVerifyRequestSchema, embedTokenVerifyResponseSchema, embedTokenVerifyValidSchema, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isMembersExceedQuantityError, isMembersExceedTargetError, isPlanClass, isRosterErrorCode, loginQuantityNeededSchema, loginlessAgentCreateRequestSchema, loginlessAgentCreateResponseSchema, loginlessAgentRemoveRequestSchema, loginlessAgentRemoveResponseSchema, membersExceedQuantityErrorSchema, membersExceedTargetErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planGrantsReadErrorSchema, planGrantsReadResponseSchema, planSwitchAppliedResponseSchema, planSwitchErrorSchema, planSwitchOpenResponseSchema, planSwitchOperationResponseSchema, planSwitchOtherErrorSchema, planSwitchPreviewLineSchema, planSwitchPreviewQuerySchema, planSwitchPreviewResponseSchema, planSwitchPreviewSubscriptionSchema, planSwitchRequestSchema, planSwitchResponseSchema, planSwitchStepSchema, planTrialStartErrorSchema, planTrialStartRequestSchema, planTrialStartResponseSchema, planTrialStateSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, rosterErrorSchema, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, signatureQuantityNeededSchema, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, switchInProgressErrorSchema, teamLoginRosterMemberSchema, teamLoginRosterQuerySchema, teamLoginRosterResponseSchema, teamMemberCreateRequestSchema, teamMemberCreateResponseSchema, teamMemberRemoveRequestSchema, teamMemberRemoveResponseSchema, teamMemberSignInLinkRequestSchema, teamMemberSignInLinkResponseSchema, tenantAppAccessResponseSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema, v1AddOnReadSchema, v1AddOnTenantSubscriptionSchema, v1AddOnsReadResponseSchema, v1TenantMatchErrorSchema };
+export { ADDON_QUANTITY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_ERROR_CODES, ADDON_QUANTITY_IDEMPOTENCY_HEADER, ADDON_QUANTITY_IDEMPOTENCY_KEY_LENGTH, ADD_ONS_READ_ERROR_CODES, ADD_ON_CHARGE_ONCE_ERROR_CODES, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER, ADD_ON_CHARGE_ONCE_IDEMPOTENCY_HEADER_ALIAS, ADD_ON_CHARGE_ONCE_MANUAL_REASONS, ADD_ON_START_ERROR_CODES, ADD_ON_START_IDEMPOTENCY_HEADER, type AddOnChargeOnceAnswer, type AddOnChargeOnceCharged, type AddOnChargeOnceDeclined, type AddOnChargeOnceError, type AddOnChargeOnceErrorCode, type AddOnChargeOnceManual, type AddOnChargeOnceManualReason, type AddOnChargeOnceQuery, type AddOnChargeOnceRequest, type AddOnChargeOnceUnknown, type AddOnOneTimePrice, type AddOnQuantityError, type AddOnQuantityErrorCode, type AddOnQuantityIdempotencyErrorCode, type AddOnQuantityOtherError, type AddOnQuantityRequest, type AddOnQuantityResponse, type AddOnStartError, type AddOnStartErrorCode, type AddOnStartRequest, type AddOnStartResponse, type AddOnUnitPrice, type AddOnsReadError, type AddOnsReadErrorCode, type AddressNormalizeFreeFormInput, type AddressNormalizeMatchedBy, type AddressNormalizePreSplitInput, type AddressNormalizeRequest, type AddressNormalizeResponse, AdminResource, type Agent, type AgentProvisionPayload, type AlreadyMember, type AppInfo, AuthResource, type BatchTagsResult, type BillingStatus, type BusinessIndustry, type BusinessType, type CachedKey, type CallerTenantScope, type CanSendInput, type CanSendResult, type ChargeConflict, type CheckoutInput, type ContextCacheResponse, type ConversionScore, type CreateActivityInput, type CreateEventInput, type CreateLeadInput, type CreateSegmentInput, EMBED_SESSION_EXPIRED_MESSAGE, EMBED_SURFACES, EMBED_SURFACE_SCOPE, EMBED_TOKEN_AUDIENCE, EMBED_TOKEN_ERRORS, EMBED_TOKEN_ERROR_STATUS, EMBED_TOKEN_INVALID_REASONS, EMBED_TOKEN_MESSAGE, EMBED_TOKEN_PREFIX, EMBED_TOKEN_REFRESH_MESSAGE, EMBED_TOKEN_SCOPES, type EffectiveSettings, type EmbedSurface, type EmbedTokenErrorCode, type EmbedTokenInvalidReason, type EmbedTokenMintRequest, type EmbedTokenMintResponse, type EmbedTokenScope, type EmbedTokenVerifyInvalid, type EmbedTokenVerifyRequest, type EmbedTokenVerifyResponse, type EmbedTokenVerifyValid, type EmitSignalBatchResult, type EmitSignalInput, type EnrollFlowInput, type EnrollJourneyInput, type Enrollment, type EntitlementResult, type EntityType, type Event, type ExtraMlosExceedQuantityError, type FeeChangedConflict, type FeeNotFound, type FeeSlugQuery, type FindByTagsInput, type FindByTagsResult, type ImplicitApiKeyUse, type InternalError, type Journey, type JourneyListParams, type Lead, type LeadShare, type LeadShareLead, type LeadShareOwner, type LeadSharesListParams, type LeadsPage, type ListLeadsParams, type LogAiUsageInput, type LogAiUsageResponse, type LoginQuantityNeeded, type LoginlessAgentCreateRequest, type LoginlessAgentCreateResponse, type LoginlessAgentRemoveRequest, type LoginlessAgentRemoveResponse, type MembersExceedQuantityError, type MembersExceedTargetError, type MiloContentInput, type MiloContentResponse, type MiloOptimizationInput, type MiloOptimizationResponse, type NurtureDecision, type NurtureDecisionParams, type OfflineInteractionResponse, type OneTimeFeeQuote, PLAN_CLASSES, PLAN_GRANTS_READ_ERROR_CODES, PLAN_SWITCH_DEDICATED_ERROR_CODES, PLAN_SWITCH_ERROR_CODES, PLAN_SWITCH_INTERVALS, PLAN_SWITCH_KEEP_ADDONS, PLAN_TRIAL_START_ERROR_CODES, PREVIEW_STALE_REASONS, PROPERTY_AUTOFILL_FIELD_KEYS, type PlanClass, type PlanGrantsReadError, type PlanGrantsReadErrorCode, type PlanGrantsReadResponse, PlanSwitchApiError, type PlanSwitchAppliedResponse, type PlanSwitchApps, type PlanSwitchError, type PlanSwitchErrorCode, type PlanSwitchInterval, type PlanSwitchKeepAddOn, type PlanSwitchOpenResponse, type PlanSwitchOperationResponse, type PlanSwitchOperationStatus, type PlanSwitchOtherError, type PlanSwitchPreviewLine, type PlanSwitchPreviewQuery, type PlanSwitchPreviewResponse, type PlanSwitchPreviewSubscription, type PlanSwitchRequest, type PlanSwitchRequestParsed, type PlanSwitchResponse, type PlanSwitchStep, type PlanSwitchStepState, type PlanTrialStartError, type PlanTrialStartErrorCode, type PlanTrialStartRequest, type PlanTrialStartResponse, type PlanTrialState, type PlatformCaller, type PlatformKeyUsageConfig, type PlatformKeyValidator, type PlatformKeyValidatorConfig, type PreviewStaleError, type PreviewStaleReason, type PropertyAutofillAttomSummary, type PropertyAutofillFieldKey, type PropertyAutofillFieldShape, type PropertyAutofillFreeFormInput, type PropertyAutofillListing, type PropertyAutofillPreSplitInput, type PropertyAutofillPropertyStatus, type PropertyAutofillPropertyType, type PropertyAutofillRequest, type PropertyAutofillResponse, type PropertyAutofillResponseError, type PropertyAutofillResponseSuccess, type ProvisionedAgent, ROSTER_ERROR_CODES, type RecordOfflineInteractionInput, type RegistrationConflict, RelloAuthError, RelloClient, type RelloClientConfig, RelloError, RelloForbiddenError, RelloNotFoundError, type RelloPermissionSelfCheckConfig, RelloRateLimitError, RelloUnavailableError, RelloValidationError, type ReportIngestInput, type RosterError, type RosterErrorCode, type RosterErrorParsed, type Segment, type SegmentRules, type SelfCheckResult, type ServiceBearerGuardConfig, ServiceClient, type ServiceClientConfig, type SetupChargeChangedEvent, type SetupChargeEnvelope, type SetupChargeRequest, type SetupChargeStatus, type SignatureQuantityNeeded, type SmsOtpRequest, type SmsRegistrationChangedEvent, type SmsRegistrationEnvelope, type SmsRegistrationRequest, type SmsRegistrationStatus, type SwitchInProgressError, TENANT_ADD_ON_STATUSES, type Tag, type TagSearchParams, type TagsListParams, type TeamAgent, type TeamLoginRosterMember, type TeamLoginRosterQuery, type TeamLoginRosterResponse, type TeamMemberCreateRequest, type TeamMemberCreateResponse, type TeamMemberRemoveRequest, type TeamMemberRemoveResponse, type TeamMemberSignInLinkRequest, type TeamMemberSignInLinkResponse, type TeamStats, type TenantAppAccessResponse, type TenantCyrState, type TenantDisablePayload, type TenantEnablePayload, type TenantPlanGrants, type TenantProvisioningPayload, type UpdateAgentInput, type UpdateLeadInput, type UsageFlushOutcome, type UsageFlushResult, type UsageInput, type V1AddOnRead, type V1AddOnTenantSubscription, type V1AddOnsReadResponse, type V1TenantMatchError, V1_TENANT_MATCH_ERRORS, type ValidateCallOptions, type ValidateSessionError, type ValidateSessionInput, type ValidateSessionResponse, type ValidatedTenant, type ValidatedUser, type ValidatorNullReason, type ValidatorNullReport, addOnChargeOnceAnswerSchema, addOnChargeOnceChargedSchema, addOnChargeOnceDeclinedSchema, addOnChargeOnceErrorSchema, addOnChargeOnceManualSchema, addOnChargeOnceQuerySchema, addOnChargeOnceRequestIdSchema, addOnChargeOnceRequestSchema, addOnChargeOnceUnknownSchema, addOnOneTimePriceSchema, addOnQuantityErrorSchema, addOnQuantityOtherErrorSchema, addOnQuantityRequestSchema, addOnQuantityResponseSchema, addOnStartErrorSchema, addOnStartRequestSchema, addOnStartResponseSchema, addOnUnitPriceSchema, addOnsReadErrorSchema, agentProvisionPayloadSchema, alreadyMemberSchema, appNotEnabledForTenantError, businessIndustry, businessType, callerHasPermission, callerTenantScope, chargeConflict, createPlatformKeyValidator, createRelloClient, createRelloPermissionSelfCheck, createServiceBearerGuard, createServiceClient, embedTokenMintRequestSchema, embedTokenMintResponseSchema, embedTokenVerifyInvalidSchema, embedTokenVerifyRequestSchema, embedTokenVerifyResponseSchema, embedTokenVerifyValidSchema, extraMlosExceedQuantityErrorSchema, feeChangedConflict, feeNotFound, feeSlugQuery, getHarvestHomeBaseUrl, getImplicitApiKeyCount, getImplicitApiKeyUses, getMiloBaseUrl, getOvenBaseUrl, getPathfinderProBaseUrl, getPropertyEngineBaseUrl, getPropertyEngineHeaders, getRelloBaseUrl, hasPropertyEngineCredentials, internalError, isExtraMlosExceedQuantityError, isInAnchorWindow, isMembersExceedQuantityError, isMembersExceedTargetError, isPlanClass, isRosterErrorCode, loginQuantityNeededSchema, loginlessAgentCreateRequestSchema, loginlessAgentCreateResponseSchema, loginlessAgentRemoveRequestSchema, loginlessAgentRemoveResponseSchema, membersExceedQuantityErrorSchema, membersExceedTargetErrorSchema, oneTimeFeeQuote, parseAgentPayload, parseTenantPayload, planGrantsReadErrorSchema, planGrantsReadResponseSchema, planSwitchAppliedResponseSchema, planSwitchErrorSchema, planSwitchOpenResponseSchema, planSwitchOperationResponseSchema, planSwitchOtherErrorSchema, planSwitchPreviewLineSchema, planSwitchPreviewQuerySchema, planSwitchPreviewResponseSchema, planSwitchPreviewSubscriptionSchema, planSwitchRequestSchema, planSwitchResponseSchema, planSwitchStepSchema, planTrialStartErrorSchema, planTrialStartRequestSchema, planTrialStartResponseSchema, planTrialStateSchema, previewStaleErrorSchema, provisionedAgentSchema, quoteVersion, registrationConflict, resetImplicitApiKeyUses, rosterErrorSchema, runRelloPermissionSelfCheck, setupChargeChangedEvent, setupChargeEnvelope, setupChargeRequest, setupChargeStatus, signatureQuantityNeededSchema, smsOtpRequest, smsRegistrationChangedEvent, smsRegistrationEnvelope, smsRegistrationRequest, smsRegistrationStatus, switchInProgressErrorSchema, teamLoginRosterMemberSchema, teamLoginRosterQuerySchema, teamLoginRosterResponseSchema, teamMemberCreateRequestSchema, teamMemberCreateResponseSchema, teamMemberRemoveRequestSchema, teamMemberRemoveResponseSchema, teamMemberSignInLinkRequestSchema, teamMemberSignInLinkResponseSchema, tenantAppAccessResponseSchema, tenantCyrStateSchema, tenantDisablePayloadSchema, tenantEnablePayloadSchema, tenantPlanGrantsSchema, tenantProvisioningPayloadSchema, v1AddOnReadSchema, v1AddOnTenantSubscriptionSchema, v1AddOnsReadResponseSchema, v1TenantMatchErrorSchema };

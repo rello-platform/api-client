@@ -2013,11 +2013,35 @@ function hasPropertyEngineCredentials(apiKey) {
 
 // src/platform-key-validator.ts
 import { createHash } from "crypto";
+var TOUCH_BATCH_MAX_ENTRIES = 500;
+var TOUCH_BATCH_MAX_COUNT = 1e6;
+function isInAnchorWindow(epochMs) {
+  return new Date(epochMs).getUTCMinutes() % 15 < 5;
+}
+function callerTenantScope(caller) {
+  if (typeof caller.tenantId === "string") return { kind: "tenant", tenantId: caller.tenantId };
+  if (caller.tenantId === null) return { kind: "platform" };
+  return { kind: "unknown" };
+}
+function readTenantId(entry) {
+  if (!Object.prototype.hasOwnProperty.call(entry, "tenantId")) return void 0;
+  const v = entry.tenantId;
+  if (v === null) return null;
+  if (typeof v === "string" && v.length > 0) return v;
+  return void 0;
+}
 function createPlatformKeyValidator(config) {
   const baseUrl = config.relloApiUrl.replace(/\/+$/, "").replace(/\/api\/?$/, "");
   const targetApp = config.ownAppSlug.toUpperCase().replace(/-/g, "_");
   const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1e3;
   const staleServeMaxMs = config.staleServeMaxMs ?? 30 * 60 * 1e3;
+  const batched = config.usage?.mode === "batched";
+  const usageWindowMs = config.usage?.windowMs ?? 15 * 60 * 1e3;
+  const alignToAnchor = batched && (config.usage?.alignToAnchorWindows ?? true);
+  const configDefer = config.usage?.defer;
+  const pendingUsage = /* @__PURE__ */ new Map();
+  let lastFlushAttemptAt = Date.now();
+  let flushInProgress = null;
   let keyCache = [];
   let lastFetchTime = 0;
   let lastSuccessTime = 0;
@@ -2071,9 +2095,27 @@ function createPlatformKeyValidator(config) {
           id: String(entry.id ?? ""),
           appSource: String(entry.appSource ?? ""),
           keyHash: String(entry.keyHash ?? ""),
-          permissions: Array.isArray(entry.permissions) ? entry.permissions.map(String) : []
+          permissions: Array.isArray(entry.permissions) ? entry.permissions.map(String) : [],
+          tenantId: readTenantId(entry)
         };
       });
+      if (pendingUsage.size > 0) {
+        const registered = new Set(keyCache.map((k) => k.id));
+        let droppedKeys = 0;
+        let droppedCount = 0;
+        for (const [keyId, count] of pendingUsage) {
+          if (!registered.has(keyId)) {
+            pendingUsage.delete(keyId);
+            droppedKeys += 1;
+            droppedCount += count;
+          }
+        }
+        if (droppedKeys > 0) {
+          console.warn(
+            `[platform-key-validator] dropped pending usage for ${droppedKeys} key(s) no longer in the registry (count=${droppedCount})`
+          );
+        }
+      }
       lastSuccessTime = lastFetchTime;
       lastFetchStatus = "ok";
       lastFetchHttpStatus = null;
@@ -2095,7 +2137,9 @@ function createPlatformKeyValidator(config) {
     }
   }
   async function ensureFreshCache() {
-    if (Date.now() - lastFetchTime < cacheTtlMs) return;
+    const now = Date.now();
+    if (now - lastFetchTime < cacheTtlMs) return;
+    if (alignToAnchor && lastSuccessTime !== 0 && !isInAnchorWindow(now)) return;
     if (!fetchInProgress) {
       fetchInProgress = refreshCache().finally(() => {
         fetchInProgress = null;
@@ -2108,7 +2152,78 @@ function createPlatformKeyValidator(config) {
     nullReasons.set(request, { reason, httpStatus: withStatus ? lastFetchHttpStatus : null });
     return null;
   }
-  const validatePlatformCaller = async function validatePlatformCaller2(request) {
+  async function sendPendingUsage() {
+    if (pendingUsage.size === 0) {
+      return { outcome: "empty", entries: 0, total: 0, httpStatus: null };
+    }
+    const entries = [];
+    for (const [keyId, count] of pendingUsage) {
+      if (entries.length >= TOUCH_BATCH_MAX_ENTRIES) break;
+      const sent = Math.min(count, TOUCH_BATCH_MAX_COUNT);
+      entries.push({ keyId, count: sent });
+      if (count > sent) pendingUsage.set(keyId, count - sent);
+      else pendingUsage.delete(keyId);
+    }
+    const total = entries.reduce((sum, e) => sum + e.count, 0);
+    const putBack = () => {
+      for (const e of entries) pendingUsage.set(e.keyId, (pendingUsage.get(e.keyId) ?? 0) + e.count);
+    };
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/platform/service-keys/touch-batch`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.relloApiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ entries }),
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (!res.ok) {
+        putBack();
+        console.warn(
+          `[platform-key-validator] usage flush refused: ${res.status} \u2014 kept ${entries.length} key(s), count=${total}, for the next window`
+        );
+        return { outcome: "failed", entries: entries.length, total, httpStatus: res.status };
+      }
+      return { outcome: "sent", entries: entries.length, total, httpStatus: res.status };
+    } catch (error) {
+      putBack();
+      console.warn(
+        `[platform-key-validator] usage flush got no answer \u2014 kept ${entries.length} key(s), count=${total}, for the next window:`,
+        error instanceof Error ? error.message : "unknown error"
+      );
+      return { outcome: "failed", entries: entries.length, total, httpStatus: null };
+    }
+  }
+  function flushUsage() {
+    if (!batched) {
+      return Promise.resolve({ outcome: "disabled", entries: 0, total: 0, httpStatus: null });
+    }
+    if (!flushInProgress) {
+      flushInProgress = sendPendingUsage().finally(() => {
+        flushInProgress = null;
+      });
+    }
+    return flushInProgress;
+  }
+  function maybeStartFlush(defer) {
+    const now = Date.now();
+    if (now - lastFlushAttemptAt < usageWindowMs) return;
+    if (alignToAnchor && !isInAnchorWindow(now)) return;
+    if (flushInProgress) return;
+    lastFlushAttemptAt = now;
+    const p = flushUsage();
+    if (!defer) return;
+    try {
+      defer(p);
+    } catch (error) {
+      console.warn(
+        "[platform-key-validator] defer threw; the usage flush runs without it:",
+        error instanceof Error ? error.message : "unknown error"
+      );
+    }
+  }
+  const validatePlatformCaller = async function validatePlatformCaller2(request, options) {
     nullReasons.delete(request);
     const authHeader = request.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) return refuse(request, "no-bearer", false);
@@ -2140,6 +2255,17 @@ function createPlatformKeyValidator(config) {
     }
     const match = keyCache.find((k) => k.keyHash === tokenHash);
     if (!match) return refuse(request, "no-key-match", false);
+    const caller = {
+      appSource: match.appSource,
+      keyId: match.id,
+      permissions: match.permissions,
+      tenantId: match.tenantId
+    };
+    if (batched) {
+      pendingUsage.set(match.id, (pendingUsage.get(match.id) ?? 0) + 1);
+      maybeStartFlush(options?.defer ?? configDefer);
+      return caller;
+    }
     void (async () => {
       try {
         await fetch(`${baseUrl}/api/v1/platform/service-keys/touch`, {
@@ -2158,14 +2284,11 @@ function createPlatformKeyValidator(config) {
         );
       }
     })();
-    return {
-      appSource: match.appSource,
-      keyId: match.id,
-      permissions: match.permissions
-    };
+    return caller;
   };
   return Object.assign(validatePlatformCaller, {
-    reasonFor: (request) => nullReasons.get(request)
+    reasonFor: (request) => nullReasons.get(request),
+    flushUsage
   });
 }
 function callerHasPermission(caller, required) {
@@ -3148,6 +3271,7 @@ export {
   businessIndustry,
   businessType,
   callerHasPermission,
+  callerTenantScope,
   chargeConflict,
   createPlatformKeyValidator,
   createRelloClient,
@@ -3176,6 +3300,7 @@ export {
   hasPropertyEngineCredentials,
   internalError,
   isExtraMlosExceedQuantityError,
+  isInAnchorWindow,
   isMembersExceedQuantityError,
   isMembersExceedTargetError,
   isPlanClass,
