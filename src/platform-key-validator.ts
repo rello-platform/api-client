@@ -54,8 +54,20 @@ export interface PlatformKeyValidatorConfig {
  *   and makes NO request. `validator.flushUsage()` sends every pending key in
  *   ONE `POST /api/v1/platform/service-keys/touch-batch`. Nothing pending
  *   sends nothing. A non-2xx answer or a network failure puts the counts back
- *   for the next window. The map only ever holds ids of keys in the current
- *   registry, so it is bounded by the registered key count.
+ *   for the next window. Counts leave the map ONLY by being carried in a
+ *   flush Rello acknowledged (2xx). A registry refresh never reads or changes
+ *   them: the registry decides whether a NEW check succeeds, never whether
+ *   past successful uses are reported, so a key revoked, expired or
+ *   retargeted after it was used still has those uses reported (since 2.46.1,
+ *   GD-2803).
+ * - Backstop bound: at most `USAGE_MAX_PENDING_KEYS` (10,000) distinct key ids
+ *   pending. A NEW id arriving at the cap is not added (the check itself still
+ *   succeeds); the use is counted as not recorded, named in one
+ *   `console.warn` per flush, and returned as `UsageFlushResult.notRecorded`.
+ *   Ids already pending keep counting past the cap, and a failed flush's
+ *   put-back is never dropped. Ids enter only through a successful check
+ *   against the registry, so in practice the cap is never reached; it exists
+ *   so the map cannot grow without limit while Rello refuses every flush.
  *
  * The flush is driven by requests, never by a timer: the first successful
  * check at least `windowMs` after the last flush attempt (or after the
@@ -109,11 +121,23 @@ export interface UsageFlushResult {
   total: number;
   /** HTTP status of the answer; null when no request was made or none came back. */
   httpStatus: number | null;
+  /**
+   * Successful checks since the previous flush that were NOT recorded because
+   * their key id was new while `USAGE_MAX_PENDING_KEYS` ids were already
+   * pending (since 2.46.1). Almost always 0.
+   */
+  notRecorded: number;
 }
 
 /** Rello's `touch-batch` limits; a flush never sends more in one request. */
 const TOUCH_BATCH_MAX_ENTRIES = 500;
 const TOUCH_BATCH_MAX_COUNT = 1_000_000;
+/**
+ * Backstop on distinct pending key ids (GD-2803 ruling, 2.46.1). Ids enter
+ * only through a successful check, so a real deployment never gets near it;
+ * it bounds the map while Rello refuses every flush.
+ */
+export const USAGE_MAX_PENDING_KEYS = 10_000;
 
 /**
  * True inside a platform anchor window: UTC minutes :00–04, :15–19, :30–34,
@@ -287,8 +311,12 @@ export function createPlatformKeyValidator(
   const configDefer = config.usage?.defer;
 
   // Batched usage: keyId → successful checks not yet acknowledged by Rello.
-  // Only ids in the current registry ever enter it (see refreshCache's prune).
+  // Entries leave ONLY through an acknowledged (2xx) flush; the registry
+  // refresh never reads or changes this map (GD-2803).
   const pendingUsage = new Map<string, number>();
+  // Uses not recorded because their id was new at USAGE_MAX_PENDING_KEYS;
+  // named (one warn) and reset by the next flush.
+  let notRecordedSinceFlush = 0;
   // Time of the last flush ATTEMPT (started by a check). Starts at creation,
   // so the first flush comes one window after the validator is built.
   let lastFlushAttemptAt = Date.now();
@@ -375,27 +403,6 @@ export function createPlatformKeyValidator(
         };
       });
 
-      // Keep the usage map bounded by the registry: a key Rello no longer
-      // lists (revoked, expired, retargeted) can gain no new counts, so its
-      // pending counts are dropped here, and said so.
-      if (pendingUsage.size > 0) {
-        const registered = new Set(keyCache.map((k) => k.id));
-        let droppedKeys = 0;
-        let droppedCount = 0;
-        for (const [keyId, count] of pendingUsage) {
-          if (!registered.has(keyId)) {
-            pendingUsage.delete(keyId);
-            droppedKeys += 1;
-            droppedCount += count;
-          }
-        }
-        if (droppedKeys > 0) {
-          console.warn(
-            `[platform-key-validator] dropped pending usage for ${droppedKeys} key(s) no longer in the registry (count=${droppedCount})`
-          );
-        }
-      }
-
       lastSuccessTime = lastFetchTime;
       lastFetchStatus = "ok";
       lastFetchHttpStatus = null;
@@ -462,8 +469,15 @@ export function createPlatformKeyValidator(
    * counts; on any failure the taken counts are added back. Never rejects.
    */
   async function sendPendingUsage(): Promise<UsageFlushResult> {
+    const notRecorded = notRecordedSinceFlush;
+    if (notRecorded > 0) {
+      notRecordedSinceFlush = 0;
+      console.warn(
+        `[platform-key-validator] ${notRecorded} use(s) not recorded since the last flush: ${USAGE_MAX_PENDING_KEYS} distinct key ids were already pending (Rello has refused the flushes that would empty them)`
+      );
+    }
     if (pendingUsage.size === 0) {
-      return { outcome: "empty", entries: 0, total: 0, httpStatus: null };
+      return { outcome: "empty", entries: 0, total: 0, httpStatus: null, notRecorded };
     }
     const entries: { keyId: string; count: number }[] = [];
     for (const [keyId, count] of pendingUsage) {
@@ -493,22 +507,22 @@ export function createPlatformKeyValidator(
         console.warn(
           `[platform-key-validator] usage flush refused: ${res.status} — kept ${entries.length} key(s), count=${total}, for the next window`
         );
-        return { outcome: "failed", entries: entries.length, total, httpStatus: res.status };
+        return { outcome: "failed", entries: entries.length, total, httpStatus: res.status, notRecorded };
       }
-      return { outcome: "sent", entries: entries.length, total, httpStatus: res.status };
+      return { outcome: "sent", entries: entries.length, total, httpStatus: res.status, notRecorded };
     } catch (error) {
       putBack();
       console.warn(
         `[platform-key-validator] usage flush got no answer — kept ${entries.length} key(s), count=${total}, for the next window:`,
         error instanceof Error ? error.message : "unknown error"
       );
-      return { outcome: "failed", entries: entries.length, total, httpStatus: null };
+      return { outcome: "failed", entries: entries.length, total, httpStatus: null, notRecorded };
     }
   }
 
   function flushUsage(): Promise<UsageFlushResult> {
     if (!batched) {
-      return Promise.resolve({ outcome: "disabled", entries: 0, total: 0, httpStatus: null });
+      return Promise.resolve({ outcome: "disabled", entries: 0, total: 0, httpStatus: null, notRecorded: 0 });
     }
     if (!flushInProgress) {
       flushInProgress = sendPendingUsage().finally(() => {
@@ -604,7 +618,12 @@ export function createPlatformKeyValidator(
 
     if (batched) {
       // Batched: count it, make no request; a due flush rides this check.
-      pendingUsage.set(match.id, (pendingUsage.get(match.id) ?? 0) + 1);
+      // An id already pending always counts; a NEW id is refused only at the
+      // USAGE_MAX_PENDING_KEYS backstop (the check itself still succeeds).
+      const held = pendingUsage.get(match.id);
+      if (held !== undefined) pendingUsage.set(match.id, held + 1);
+      else if (pendingUsage.size < USAGE_MAX_PENDING_KEYS) pendingUsage.set(match.id, 1);
+      else notRecordedSinceFlush += 1;
       maybeStartFlush(options?.defer ?? configDefer);
       return caller;
     }

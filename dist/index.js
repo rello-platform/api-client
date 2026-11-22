@@ -2015,6 +2015,7 @@ function hasPropertyEngineCredentials(apiKey) {
 import { createHash } from "crypto";
 var TOUCH_BATCH_MAX_ENTRIES = 500;
 var TOUCH_BATCH_MAX_COUNT = 1e6;
+var USAGE_MAX_PENDING_KEYS = 1e4;
 function isInAnchorWindow(epochMs) {
   return new Date(epochMs).getUTCMinutes() % 15 < 5;
 }
@@ -2040,6 +2041,7 @@ function createPlatformKeyValidator(config) {
   const alignToAnchor = batched && (config.usage?.alignToAnchorWindows ?? true);
   const configDefer = config.usage?.defer;
   const pendingUsage = /* @__PURE__ */ new Map();
+  let notRecordedSinceFlush = 0;
   let lastFlushAttemptAt = Date.now();
   let flushInProgress = null;
   let keyCache = [];
@@ -2099,23 +2101,6 @@ function createPlatformKeyValidator(config) {
           tenantId: readTenantId(entry)
         };
       });
-      if (pendingUsage.size > 0) {
-        const registered = new Set(keyCache.map((k) => k.id));
-        let droppedKeys = 0;
-        let droppedCount = 0;
-        for (const [keyId, count] of pendingUsage) {
-          if (!registered.has(keyId)) {
-            pendingUsage.delete(keyId);
-            droppedKeys += 1;
-            droppedCount += count;
-          }
-        }
-        if (droppedKeys > 0) {
-          console.warn(
-            `[platform-key-validator] dropped pending usage for ${droppedKeys} key(s) no longer in the registry (count=${droppedCount})`
-          );
-        }
-      }
       lastSuccessTime = lastFetchTime;
       lastFetchStatus = "ok";
       lastFetchHttpStatus = null;
@@ -2153,8 +2138,15 @@ function createPlatformKeyValidator(config) {
     return null;
   }
   async function sendPendingUsage() {
+    const notRecorded = notRecordedSinceFlush;
+    if (notRecorded > 0) {
+      notRecordedSinceFlush = 0;
+      console.warn(
+        `[platform-key-validator] ${notRecorded} use(s) not recorded since the last flush: ${USAGE_MAX_PENDING_KEYS} distinct key ids were already pending (Rello has refused the flushes that would empty them)`
+      );
+    }
     if (pendingUsage.size === 0) {
-      return { outcome: "empty", entries: 0, total: 0, httpStatus: null };
+      return { outcome: "empty", entries: 0, total: 0, httpStatus: null, notRecorded };
     }
     const entries = [];
     for (const [keyId, count] of pendingUsage) {
@@ -2183,21 +2175,21 @@ function createPlatformKeyValidator(config) {
         console.warn(
           `[platform-key-validator] usage flush refused: ${res.status} \u2014 kept ${entries.length} key(s), count=${total}, for the next window`
         );
-        return { outcome: "failed", entries: entries.length, total, httpStatus: res.status };
+        return { outcome: "failed", entries: entries.length, total, httpStatus: res.status, notRecorded };
       }
-      return { outcome: "sent", entries: entries.length, total, httpStatus: res.status };
+      return { outcome: "sent", entries: entries.length, total, httpStatus: res.status, notRecorded };
     } catch (error) {
       putBack();
       console.warn(
         `[platform-key-validator] usage flush got no answer \u2014 kept ${entries.length} key(s), count=${total}, for the next window:`,
         error instanceof Error ? error.message : "unknown error"
       );
-      return { outcome: "failed", entries: entries.length, total, httpStatus: null };
+      return { outcome: "failed", entries: entries.length, total, httpStatus: null, notRecorded };
     }
   }
   function flushUsage() {
     if (!batched) {
-      return Promise.resolve({ outcome: "disabled", entries: 0, total: 0, httpStatus: null });
+      return Promise.resolve({ outcome: "disabled", entries: 0, total: 0, httpStatus: null, notRecorded: 0 });
     }
     if (!flushInProgress) {
       flushInProgress = sendPendingUsage().finally(() => {
@@ -2262,7 +2254,10 @@ function createPlatformKeyValidator(config) {
       tenantId: match.tenantId
     };
     if (batched) {
-      pendingUsage.set(match.id, (pendingUsage.get(match.id) ?? 0) + 1);
+      const held = pendingUsage.get(match.id);
+      if (held !== void 0) pendingUsage.set(match.id, held + 1);
+      else if (pendingUsage.size < USAGE_MAX_PENDING_KEYS) pendingUsage.set(match.id, 1);
+      else notRecordedSinceFlush += 1;
       maybeStartFlush(options?.defer ?? configDefer);
       return caller;
     }
@@ -3245,6 +3240,7 @@ export {
   RelloValidationError,
   ServiceClient,
   TENANT_ADD_ON_STATUSES,
+  USAGE_MAX_PENDING_KEYS,
   V1_TENANT_MATCH_ERRORS,
   addOnChargeOnceAnswerSchema,
   addOnChargeOnceChargedSchema,
