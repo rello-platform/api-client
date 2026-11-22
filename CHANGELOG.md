@@ -6,6 +6,35 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.46.0 — 2026-11-22
+
+### Added — batched key-usage reporting and the caller's tenant (tracking S2b part 1, Platform KA prompt 1613)
+
+Plan: PLATFORM-TRACKING-SYSTEM `PLAN-PLATFORM-TRACKING-SYSTEM-261120.md` §9.1, §9.2. Version read at
+2026-11-22: v2.45.0 tagged (newest). Additive: a validator built without `usage` behaves exactly as
+v2.45.0, so Property Engine and every other consumer are untouched until they opt in.
+
+- `createPlatformKeyValidator({ …, usage })` — `usage: { mode: "per-request" | "batched", windowMs?
+  (900000), alignToAnchorWindows? (true), defer? }` (`PlatformKeyUsageConfig`). Default
+  `"per-request"` keeps one `POST /service-keys/touch` per successful check.
+- `"batched"`: a successful check adds `keyId → count` to an in-memory map and makes no request.
+  `validator.flushUsage()` sends every pending key in ONE `POST /api/v1/platform/service-keys/touch-batch`
+  (`{ entries: [{ keyId, count }] }`, ≤ 500 entries, each count ≤ 1,000,000; any excess stays pending).
+  Nothing pending sends nothing. A non-2xx answer or no answer puts the counts back for the next window.
+  The map holds only ids in the current registry (a key that leaves the registry has its pending counts
+  dropped, with one warning), so it is bounded by the registered key count. Returns `UsageFlushResult`
+  (`outcome: "disabled" | "empty" | "sent" | "failed"`, `entries`, `total`, `httpStatus`); never rejects.
+- The flush is request-driven, never a timer: the first successful check ≥ `windowMs` after the last
+  attempt (or creation) that falls inside an anchor window (UTC :00–04, :15–19, :30–34, :45–49, Rello's
+  `auth-buffer-flush` windows) hands `flushUsage()` to `defer`. The validator call takes an optional
+  second argument `{ defer }` that overrides `usage.defer`: a Worker's `ctx` belongs to one request.
+- Batched mode only: after `cacheTtlMs` the registry refresh waits for the next anchor window and serves
+  the cached keys until then. A validator that has never loaded the registry still fetches at once.
+- `CachedKey` (now exported) and `PlatformCaller` gain `tenantId: string | null | undefined`: a string =
+  tenant scope, `null` = platform scope, `undefined` = the registry answer carried no usable `tenantId`
+  (scope UNKNOWN, never platform). `callerTenantScope(caller)` returns `tenant | platform | unknown`.
+  `isInAnchorWindow(ms)` exported.
+
 ## v2.45.0 — 2026-11-20
 
 ### Added — the plan switch as client methods, for UPGRADE-TO-RELLO (Platform KA prompt 1545)

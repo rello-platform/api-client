@@ -60,6 +60,14 @@ export {
   type PlatformKeyValidator,
   type ValidatorNullReason,
   type ValidatorNullReport,
+  callerTenantScope,
+  isInAnchorWindow,
+  type CachedKey,
+  type CallerTenantScope,
+  type PlatformKeyUsageConfig,
+  type UsageFlushOutcome,
+  type UsageFlushResult,
+  type ValidateCallOptions,
 } from "./platform-key-validator.js";
 
 // Deploy-time spoke→Rello permission self-check (outbound counterpart to the validator)
