@@ -3269,6 +3269,15 @@ var v1AddOnReadFields = {
   id: import_zod7.z.string().min(1),
   appSlug: import_zod7.z.string().min(1),
   name: import_zod7.z.string().min(1),
+  /**
+   * The row's stable catalog key (PFP Gateway U6; Platform KA prompt 1697):
+   * Rello's addOnCatalogKeyOf(metadata) — metadata.catalogKey, else
+   * metadata.featureSlug, trimmed. Match on this, never on `name`: a rename in
+   * Platform Admin keeps the key.
+   *   string — the key; null — Rello answered and the row has none (never "");
+   *   absent — a Rello that predates the field. Absent is NOT "no key".
+   */
+  key: import_zod7.z.string().min(1).nullable().optional(),
   isActive: import_zod7.z.boolean(),
   tenantAddOn: v1AddOnTenantSubscriptionSchema.nullable()
 };

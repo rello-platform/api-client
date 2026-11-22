@@ -6,6 +6,25 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.47.0 — PROPOSED, not tagged (the Platform KA rules the release)
+
+### Added — each add-on's catalog key on the add-ons read (PFP Gateway U6 matching; Platform KA prompt 1697)
+
+- `v1AddOnReadSchema` items (RECURRING and ONE_TIME) gain `key`: the row's
+  stable catalog key, Rello's `addOnCatalogKeyOf(metadata)` (metadata.catalogKey,
+  else metadata.featureSlug, trimmed). Match add-ons on `key`, never on `name`:
+  a rename in Platform Admin keeps the key (the Gateway KA found
+  "Extra Team Login" where a spec said "Extra Team login").
+- Three states, never collapsed: a string is the key; `null` means Rello
+  answered and the row has none (never `""`, which is refused); **absent** means
+  a Rello that predates the field. The field is `.optional()` so the served
+  bodies captured at Rello dd8e6c00c, and any Rello not yet deployed with it,
+  still parse. Absent is NOT "no key": a caller that needs a key treats absent
+  as unknown.
+- Rello side: kellydavidsansom/Rello branch billing/addons-read-catalog-key
+  (DRAFT). Deploy order: Rello first, then consumers bump to this version.
+- Additive. Nothing else changes.
+
 ## v2.46.2 — 2026-11-22
 
 ### Fixed — the backstop cap counts ids a flush is carrying (GD-2825, PLATFORM AUDIT 131 prompt 1623; Platform KA prompt 1625)
