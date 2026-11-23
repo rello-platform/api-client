@@ -4546,6 +4546,7 @@ declare const v1AddOnReadSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     appSlug: z.ZodString;
     name: z.ZodString;
+    key: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     isActive: z.ZodBoolean;
     tenantAddOn: z.ZodNullable<z.ZodObject<{
         status: z.ZodString;
@@ -4564,6 +4565,7 @@ declare const v1AddOnReadSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     appSlug: z.ZodString;
     name: z.ZodString;
+    key: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     isActive: z.ZodBoolean;
     tenantAddOn: z.ZodNullable<z.ZodObject<{
         status: z.ZodString;
@@ -4591,6 +4593,7 @@ declare const v1AddOnsReadResponseSchema: z.ZodObject<{
         id: z.ZodString;
         appSlug: z.ZodString;
         name: z.ZodString;
+        key: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         isActive: z.ZodBoolean;
         tenantAddOn: z.ZodNullable<z.ZodObject<{
             status: z.ZodString;
@@ -4609,6 +4612,7 @@ declare const v1AddOnsReadResponseSchema: z.ZodObject<{
         id: z.ZodString;
         appSlug: z.ZodString;
         name: z.ZodString;
+        key: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         isActive: z.ZodBoolean;
         tenantAddOn: z.ZodNullable<z.ZodObject<{
             status: z.ZodString;
