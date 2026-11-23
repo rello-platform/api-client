@@ -6,7 +6,7 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
-## v2.47.0 — PROPOSED, not tagged (the Platform KA rules the release)
+## v2.47.0 — 2026-11-22
 
 ### Added — each add-on's catalog key on the add-ons read (PFP Gateway U6 matching; Platform KA prompt 1697)
 
