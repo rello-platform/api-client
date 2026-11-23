@@ -6,6 +6,33 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.48.0 — 2026-11-23
+
+### Added — an optional discount code on the plan switch (D65 step 3, Platform KA prompts 1694 and 1735)
+
+- `planSwitchPreviewQuerySchema` and `planSwitchRequestSchema` take an optional
+  `promotionCode`: the human-typed code, trimmed, at most
+  `PLAN_SWITCH_PROMOTION_CODE_MAX_LENGTH` (200) characters. Empty or blank is
+  absent, so a caller that sends nothing (or `""`) gets exactly today's answer.
+  `PlanSwitchRequest.promotionCode` for callers. A POST code needs the
+  `previewId` of the preview asked with the same code.
+- `PlanSwitchPreviewResponse.promotion` (optional; schema too): `{ code,
+  discountAmount, coupon }`, Stripe's spelling, Stripe's discount amount on the
+  preview invoice, and the coupon's terms as Stripe states them.
+  `subscriptions[].total` and `amountDueNow` are already Stripe's discounted
+  totals; PFP computes nothing.
+- `PLAN_SWITCH_ERROR_CODES` adds the code refusals (400): `code_not_found`,
+  `code_expired`, `code_inactive`, `code_used_up`, `code_not_for_plan`,
+  `code_not_for_account`, `code_not_applicable`,
+  `promotion_code_requires_preview`. Each refuses the code only; the same
+  switch without a code is unaffected. They parse through the open branch of
+  `planSwitchErrorSchema`, as every non-dedicated code does.
+- `PREVIEW_STALE_REASONS` adds `promotion_code_changed` (409 `preview_stale`):
+  the POST's code is not the code the preview was quoted with.
+- Rello side: kellydavidsansom/Rello #2623 (D65 step 3). It pins this version
+  and deletes its local bridge (`promotion-contract.ts`) in the same PR.
+- Additive, on top of v2.47.0 (the add-on `key`). Nothing else changes.
+
 ## v2.47.0 — 2026-11-22
 
 ### Added — each add-on's catalog key on the add-ons read (PFP Gateway U6 matching; Platform KA prompt 1697)
