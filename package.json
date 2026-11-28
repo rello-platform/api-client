@@ -50,7 +50,7 @@
   },
   "dependencies": {
     "@rello-platform/permissions": "github:rello-platform/permissions#v0.62.0",
-    "@rello-platform/slugs": "github:rello-platform/slugs#9a397b1c8c532172a46dbf8fe182bbfb7eaba148",
+    "@rello-platform/slugs": "github:rello-platform/slugs#v0.15.0",
     "zod": "^4.3.6"
   }
 }

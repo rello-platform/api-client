@@ -16,10 +16,10 @@ AUDIT 99.)
   `z.object`, so before this release the key was stripped and never reached a
   spoke. Absent stays absent (an older Rello is unknown, never a default); a
   value outside `HUB_DOMAINS` is refused.
-- `@rello-platform/slugs` moves from `#v0.7.0` to
-  `#9a397b1c8c532172a46dbf8fe182bbfb7eaba148` (slugs v0.15.0, HI-01, untagged),
-  the first slugs release with `HUB_DOMAINS`. Until slugs is tagged this is a
-  SHA pin, as in Rello #2744.
+- `@rello-platform/slugs` moves from `#v0.7.0` to `#v0.15.0` (HI-01, merge
+  commit `0f1891547375135d3fae2aaba85b8fe13ad69ec4`), the first slugs release
+  with `HUB_DOMAINS`. The draft first pinned the untagged PR head
+  `9a397b1c8c532172a46dbf8fe182bbfb7eaba148`; the tag's tree is identical.
 - api-client now imports a VALUE from slugs (before: types only, erased at
   build), so `dist/` requires `@rello-platform/slugs` at runtime in both the ESM
   and the CJS build. slugs was already in `dependencies`.
