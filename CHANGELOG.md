@@ -6,6 +6,24 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.49.0 — 2026-11-28 (draft; untagged)
+
+### Added — `tenant.hubDomain` on the tenant-enable payload (Home Insight HI-21)
+
+- `tenantEnablePayloadSchema.tenant.hubDomain`: `z.enum(HUB_DOMAINS).optional()`,
+  `HUB_DOMAINS` from `@rello-platform/slugs` (`THEHOMESCOUT`, `HOMEINSIGHT`).
+  Rello's tenant push returns `safeParse(payload).data`, and `tenant` is a plain
+  `z.object`, so before this release the key was stripped and never reached a
+  spoke. Absent stays absent (an older Rello is unknown, never a default); a
+  value outside `HUB_DOMAINS` is refused.
+- `@rello-platform/slugs` moves from `#v0.7.0` to
+  `#9a397b1c8c532172a46dbf8fe182bbfb7eaba148` (slugs v0.15.0, HI-01, untagged),
+  the first slugs release with `HUB_DOMAINS`. Until slugs is tagged this is a
+  SHA pin, as in Rello #2744.
+- api-client now imports a VALUE from slugs (before: types only, erased at
+  build), so `dist/` requires `@rello-platform/slugs` at runtime in both the ESM
+  and the CJS build. slugs was already in `dependencies`.
+
 ## v2.48.0 — 2026-11-23
 
 ### Added — an optional discount code on the plan switch (D65 step 3, Platform KA prompts 1694 and 1735)

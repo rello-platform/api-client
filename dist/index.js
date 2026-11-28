@@ -2489,6 +2489,7 @@ var PROPERTY_AUTOFILL_FIELD_KEYS = [
 
 // src/types/provisioning.ts
 import { z as z4 } from "zod";
+import { HUB_DOMAINS } from "@rello-platform/slugs";
 
 // src/types/plan-trial.ts
 import { z as z3 } from "zod";
@@ -2591,7 +2592,14 @@ var tenantEnablePayloadSchema = z4.object({
     // Rello Plan enum
     // PFP Gateway §4.2 (G-2): "pfp-gateway" for a tenant created by a PFP
     // gateway checkout; null for every other tenant. Sticky once set.
-    billingOrigin: z4.string().nullable().optional()
+    billingOrigin: z4.string().nullable().optional(),
+    // Home Insight HI-21 (spec RELLO-HOME-INSIGHT §9, X-34, L-2): the account's
+    // hub domain, Rello `Tenant.hubDomain`, one of HUB_DOMAINS from
+    // @rello-platform/slugs. Set once at Home Insight sign-up and never
+    // cleared. Absent = an older Rello (unknown, never a default domain); a
+    // value outside HUB_DOMAINS is refused. Before v2.49.0 this plain z.object
+    // stripped the key, so it never left Rello.
+    hubDomain: z4.enum(HUB_DOMAINS).optional()
   }),
   agents: z4.array(provisionedAgentSchema),
   // PFP Gateway §4.2 (G-2): the tenant's plan grants, from Rello's

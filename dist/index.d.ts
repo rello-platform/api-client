@@ -3221,6 +3221,10 @@ declare const tenantEnablePayloadSchema: z.ZodObject<{
         type: z.ZodString;
         plan: z.ZodString;
         billingOrigin: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        hubDomain: z.ZodOptional<z.ZodEnum<{
+            THEHOMESCOUT: "THEHOMESCOUT";
+            HOMEINSIGHT: "HOMEINSIGHT";
+        }>>;
     }, z.core.$strip>;
     agents: z.ZodArray<z.ZodObject<{
         relloAgentId: z.ZodString;
@@ -3399,6 +3403,10 @@ declare const tenantProvisioningPayloadSchema: z.ZodDiscriminatedUnion<[z.ZodObj
         type: z.ZodString;
         plan: z.ZodString;
         billingOrigin: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        hubDomain: z.ZodOptional<z.ZodEnum<{
+            THEHOMESCOUT: "THEHOMESCOUT";
+            HOMEINSIGHT: "HOMEINSIGHT";
+        }>>;
     }, z.core.$strip>;
     agents: z.ZodArray<z.ZodObject<{
         relloAgentId: z.ZodString;
