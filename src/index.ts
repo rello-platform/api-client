@@ -491,3 +491,15 @@ export {
   resetImplicitApiKeyUses,
   type ImplicitApiKeyUse,
 } from "./implicit-apikey-telemetry.js";
+
+// Property Engine POST /api/licensed-agents/match (HI-22, v2.50.0): the batch licensed-agent match
+// contract, copied verbatim from PE (see src/types/licensed-agent-match.ts). Types only.
+export type {
+  LicensedAgentMatchLicenseStatus,
+  LicensedAgentMatchInput,
+  LicensedAgentMatchRequest,
+  LicensedAgentMatchConfidence,
+  LicensedAgentMatchCandidate,
+  LicensedAgentMatchResult,
+  LicensedAgentMatchResponse,
+} from "./types/licensed-agent-match.js";

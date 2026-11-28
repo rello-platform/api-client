@@ -6,6 +6,21 @@ v2.32.0), built on top of main, so its tag contains every earlier release.
 (Replaces the v2.31.0 note that 2.29.0 belonged to #10 alone; GD-1661,
 AUDIT 99.)
 
+## v2.50.0 — 2026-11-28 (draft; untagged)
+
+### Added — the licensed-agent batch match contract (Home Insight HI-22, Platform KA prompt 2408)
+
+- `LicensedAgentMatchRequest`, `LicensedAgentMatchResult`, `LicensedAgentMatchResponse` (with
+  `LicensedAgentMatchInput`, `LicensedAgentMatchCandidate`, `LicensedAgentMatchConfidence`,
+  `LicensedAgentMatchLicenseStatus`): the contract of Property Engine's
+  `POST /api/licensed-agents/match` (`licensed-agents:read`), for Rello's HI-40. Types only:
+  `dist/index.js` and `dist/index.cjs` gain no code.
+- `src/types/licensed-agent-match.ts` holds the block copied verbatim from Property Engine
+  `src/lib/licensed-directory/api-types.ts`; PE's
+  `scripts/check-licensed-agent-match-contract.mjs` fails when the two differ after whitespace is
+  normalized. Change the contract in PE first.
+- Tag after the PE route merges (the merge unit), so the tag never names a contract PE does not serve.
+
 ## v2.49.0 — 2026-11-28 (draft; untagged)
 
 ### Added — `tenant.hubDomain` on the tenant-enable payload (Home Insight HI-21)
